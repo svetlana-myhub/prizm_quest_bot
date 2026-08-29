@@ -77,6 +77,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 """
 
+BADGES_SEED = [
+    ("facts_master", "🔷 Исследователь Prizm"),
+    ("security_keeper", "🔐 Хранитель безопасности"),
+    ("quest_graduate", "🎓 Выпускник квеста"),
+]
+
 
 def get_connection():
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -89,6 +95,10 @@ def init_db():
     conn = get_connection()
     try:
         conn.executescript(SCHEMA)
+        conn.executemany(
+            "INSERT OR IGNORE INTO badges (code, title) VALUES (?, ?)",
+            BADGES_SEED,
+        )
         conn.commit()
     finally:
         conn.close()
@@ -185,6 +195,72 @@ def count_done_facts(tg_id):
             (tg_id,),
         ).fetchone()
         return row["cnt"]
+    finally:
+        conn.close()
+
+
+def is_step_done(tg_id, step_code):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM quest_progress WHERE tg_id = ? AND step_code = ?",
+            (tg_id, step_code),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def mark_step_done(tg_id, step_code):
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO quest_progress (tg_id, step_code) VALUES (?, ?)",
+            (tg_id, step_code),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def award_badge_once(tg_id, badge_code):
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO user_badges (tg_id, badge_code) VALUES (?, ?)",
+            (tg_id, badge_code),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_badge_title(badge_code):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT title FROM badges WHERE code = ?", (badge_code,)
+        ).fetchone()
+        return row["title"] if row else badge_code
+    finally:
+        conn.close()
+
+
+def get_user_badges(tg_id):
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT b.title
+            FROM user_badges ub
+            JOIN badges b ON b.code = ub.badge_code
+            WHERE ub.tg_id = ?
+            ORDER BY ub.awarded_at
+            """,
+            (tg_id,),
+        ).fetchall()
+        return [row["title"] for row in rows]
     finally:
         conn.close()
 

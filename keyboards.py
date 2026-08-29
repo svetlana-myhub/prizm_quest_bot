@@ -66,3 +66,48 @@ def back_menu_kb():
         types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
     )
     return markup
+
+
+def step_start_kb(step):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if step.get("kind") == "question":
+        markup.add(
+            types.InlineKeyboardButton(
+                "❓ Ответить на вопрос",
+                callback_data=f"quest:quiz:{step['id']}",
+            )
+        )
+    else:
+        markup.add(
+            types.InlineKeyboardButton(
+                "✅ Шаг выполнен",
+                callback_data=f"quest:done:{step['id']}",
+            )
+        )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+def quest_answer_kb(step):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for index, option in enumerate(step["options"]):
+        markup.add(
+            types.InlineKeyboardButton(
+                option,
+                callback_data=f"quest:ans:{step['id']}:{index}",
+            )
+        )
+    return markup
+
+
+def quest_next_kb():
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("➡️ Следующий шаг", callback_data="quest:next")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
