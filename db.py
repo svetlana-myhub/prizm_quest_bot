@@ -75,12 +75,32 @@ CREATE TABLE IF NOT EXISTS audit_log (
     details TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS myth_progress (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id INTEGER NOT NULL,
+    myth_id TEXT NOT NULL,
+    is_correct INTEGER NOT NULL DEFAULT 0,
+    completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(tg_id, myth_id)
+);
+
+CREATE TABLE IF NOT EXISTS word_progress (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id INTEGER NOT NULL,
+    word_id TEXT NOT NULL,
+    is_correct INTEGER NOT NULL DEFAULT 0,
+    completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(tg_id, word_id)
+);
 """
 
 BADGES_SEED = [
     ("facts_master", "🔷 Исследователь Prizm"),
     ("security_keeper", "🔐 Хранитель безопасности"),
     ("quest_graduate", "🎓 Выпускник квеста"),
+    ("myth_master", "🎭 Разоблачитель мифов"),
+    ("word_master", "🧠 Эрудит Prizm"),
 ]
 
 
@@ -261,6 +281,90 @@ def get_user_badges(tg_id):
             (tg_id,),
         ).fetchall()
         return [row["title"] for row in rows]
+    finally:
+        conn.close()
+
+
+def is_myth_done(tg_id, myth_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM myth_progress WHERE tg_id = ? AND myth_id = ?",
+            (tg_id, myth_id),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def mark_myth_done(tg_id, myth_id, is_correct):
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO myth_progress (tg_id, myth_id, is_correct)
+            VALUES (?, ?, ?)
+            ON CONFLICT(tg_id, myth_id) DO UPDATE SET
+                is_correct = excluded.is_correct,
+                completed_at = datetime('now')
+            """,
+            (tg_id, myth_id, int(is_correct)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def count_done_myths(tg_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM myth_progress WHERE tg_id = ?",
+            (tg_id,),
+        ).fetchone()
+        return row["cnt"]
+    finally:
+        conn.close()
+
+
+def is_word_done(tg_id, word_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM word_progress WHERE tg_id = ? AND word_id = ?",
+            (tg_id, word_id),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def mark_word_done(tg_id, word_id, is_correct):
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO word_progress (tg_id, word_id, is_correct)
+            VALUES (?, ?, ?)
+            ON CONFLICT(tg_id, word_id) DO UPDATE SET
+                is_correct = excluded.is_correct,
+                completed_at = datetime('now')
+            """,
+            (tg_id, word_id, int(is_correct)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def count_done_words(tg_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM word_progress WHERE tg_id = ?",
+            (tg_id,),
+        ).fetchone()
+        return row["cnt"]
     finally:
         conn.close()
 

@@ -2,6 +2,7 @@ import logging
 import re
 
 import telebot
+from telebot import types
 
 from config import BOT_TOKEN, ADMIN_TG_IDS
 import db
@@ -15,6 +16,10 @@ from keyboards import (
     step_start_kb,
     quest_answer_kb,
     quest_next_kb,
+    myths_kb,
+    next_myth_kb,
+    words_kb,
+    next_word_kb
 )
 from texts import (
     DISCLAIMER,
@@ -27,9 +32,13 @@ from texts import (
     QUEST_ALL_DONE_TEXT,
     QUEST_FINISHED_TEXT,
     UNKNOWN_TEXT,
+    MYTHS_ALL_DONE,
+    WORDS_ALL_DONE
 )
 from content.facts import FACTS
 from content.quest import QUEST_STEPS
+from content.myths import MYTHS
+from content.words import WORDS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,6 +95,31 @@ def find_next_step(tg_id):
     for step in QUEST_STEPS:
         if not db.is_step_done(tg_id, step["id"]):
             return step
+    return None
+
+
+def get_myth_by_id(myth_id):
+    for m in MYTHS:
+        if m["id"] == myth_id:
+            return m
+    return None
+
+def find_next_myth(tg_id):
+    for m in MYTHS:
+        if not db.is_myth_done(tg_id, m["id"]):
+            return m
+    return None
+
+def get_word_by_id(word_id):
+    for w in WORDS:
+        if w["id"] == word_id:
+            return w
+    return None
+
+def find_next_word(tg_id):
+    for w in WORDS:
+        if not db.is_word_done(tg_id, w["id"]):
+            return w
     return None
 
 
@@ -188,11 +222,19 @@ def main_menu(call):
         edit_or_send(call, text, back_menu_kb())
         return
 
-    texts = {
-        "games": GAMES_SOON,
-        "help": HELP_TEXT,
-    }
-    edit_or_send(call, texts.get(section, "Раздел в разработке"), main_menu_kb())
+    if section == "games":
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton(" Миф или правда", callback_data="myth:start"),
+            types.InlineKeyboardButton(" Отгадай слово", callback_data="word:start"),
+        )
+        markup.add(types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home"))
+        edit_or_send(call, "Выберите игру:", markup)
+        return
+
+    if section == "help":
+        edit_or_send(call, HELP_TEXT, back_menu_kb())
+        return
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fact:"))
@@ -330,6 +372,132 @@ def seed_guard(message):
 @bot.message_handler(func=lambda message: True, content_types=["text"])
 def unknown_text(message):
     bot.send_message(message.chat.id, UNKNOWN_TEXT, reply_markup=main_menu_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("myth:"))
+def myth_flow(call):
+    parts = call.data.split(":")
+    action = parts[1]
+
+    if action == "start":
+        bot.answer_callback_query(call.id)
+        myth = find_next_myth(call.from_user.id)
+        if myth is None:
+            edit_or_send(call, MYTHS_ALL_DONE, back_menu_kb())
+        else:
+            edit_or_send(
+                call,
+                f"🎭 {myth['statement']}",
+                myths_kb(myth["id"], ["✅ Правда", "❌ Миф"]),
+            )
+        return
+
+    if action == "next":
+        bot.answer_callback_query(call.id)
+        myth = find_next_myth(call.from_user.id)
+        if myth is None:
+            edit_or_send(call, MYTHS_ALL_DONE, back_menu_kb())
+        else:
+            edit_or_send(
+                call,
+                f"🎭 {myth['statement']}",
+                myths_kb(myth["id"], ["✅ Правда", "❌ Миф"]),
+            )
+        return
+
+    if action == "ans":
+        myth = get_myth_by_id(parts[2])
+        if myth is None:
+            return
+        answer_index = int(parts[3])
+        # Если myth["answer"] == True (правда), то правильный ответ — индекс 0 ("✅ Правда")
+        # Если myth["answer"] == False (миф), то правильный ответ — индекс 1 ("❌ Миф")
+        correct_index = 0 if myth["answer"] else 1
+        is_correct = answer_index == correct_index
+
+        if not db.is_myth_done(call.from_user.id, myth["id"]):
+            db.mark_myth_done(call.from_user.id, myth["id"], is_correct)
+            if is_correct:
+                db.add_crystals(
+                    call.from_user.id,
+                    myth["reward_crystals"],
+                    f"myth:{myth['id']}",
+                )
+
+        if is_correct:
+            extra = ""
+            if db.count_done_myths(call.from_user.id) == len(MYTHS):
+                if db.award_badge_once(call.from_user.id, "myth_master"):
+                    extra = "\n\n Новый бейдж: 🎭 Разоблачитель мифов!"
+            text = (
+                f"✅ Верно! +{myth['reward_crystals']} 🔷{extra}\n\n"
+                f"{myth['explanation']}"
+            )
+            edit_or_send(call, text, next_myth_kb())
+        else:
+            text = f"❌ Неверно.\n\n{myth['explanation']}"
+            edit_or_send(call, text, next_myth_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("word:"))
+def word_flow(call):
+    parts = call.data.split(":")
+    action = parts[1]
+
+    if action == "start":
+        bot.answer_callback_query(call.id)
+        word = find_next_word(call.from_user.id)
+        if word is None:
+            edit_or_send(call, WORDS_ALL_DONE, back_menu_kb())
+        else:
+            edit_or_send(
+                call,
+                f"🧠 Отгадай слово\n\n💡 {word['hint']}",
+                words_kb(word["id"], word["options"]),
+            )
+        return
+
+    if action == "next":
+        bot.answer_callback_query(call.id)
+        word = find_next_word(call.from_user.id)
+        if word is None:
+            edit_or_send(call, WORDS_ALL_DONE, back_menu_kb())
+        else:
+            edit_or_send(
+                call,
+                f"🧠 Отгадай слово\n\n💡 {word['hint']}",
+                words_kb(word["id"], word["options"]),
+            )
+        return
+
+    if action == "ans":
+        word = get_word_by_id(parts[2])
+        if word is None:
+            return
+        answer_index = int(parts[3])
+        is_correct = answer_index == word["correct_index"]
+
+        if not db.is_word_done(call.from_user.id, word["id"]):
+            db.mark_word_done(call.from_user.id, word["id"], is_correct)
+            if is_correct:
+                db.add_crystals(
+                    call.from_user.id,
+                    word["reward_crystals"],
+                    f"word:{word['id']}",
+                )
+
+        if is_correct:
+            extra = ""
+            if db.count_done_words(call.from_user.id) == len(WORDS):
+                if db.award_badge_once(call.from_user.id, "word_master"):
+                    extra = "\n\n Новый бейдж: 🧠 Эрудит Prizm!"
+            text = (
+                f"✅ Верно! Это «{word['term']}». +{word['reward_crystals']} 🔷{extra}\n\n"
+                f"{word['explanation']}"
+            )
+            edit_or_send(call, text, next_word_kb())
+        else:
+            edit_or_send(call, "❌ Неверно, попробуй ещё раз 😉", None)
 
 
 if __name__ == "__main__":

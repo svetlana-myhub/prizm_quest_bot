@@ -111,3 +111,49 @@ def quest_next_kb():
         types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
     )
     return markup
+
+
+def myths_kb(myth_id, options):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for index, option in enumerate(options):
+        markup.add(
+            types.InlineKeyboardButton(
+                option,
+                callback_data=f"myth:ans:{myth_id}:{index}",
+            )
+        )
+    return markup
+
+
+def next_myth_kb():
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("➡️ Следующий миф", callback_data="myth:next")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+def words_kb(word_id, options):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for index, option in enumerate(options):
+        markup.add(
+            types.InlineKeyboardButton(
+                option,
+                callback_data=f"word:ans:{word_id}:{index}",
+            )
+        )
+    return markup
+
+
+def next_word_kb():
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("➡️ Следующее слово", callback_data="word:next")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
