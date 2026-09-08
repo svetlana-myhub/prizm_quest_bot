@@ -14,7 +14,16 @@ CREATE TABLE IF NOT EXISTS users (
     state TEXT NOT NULL DEFAULT 'START',
     crystals INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    final_test_passed INTEGER NOT NULL DEFAULT 0,
+    prizm_address TEXT
+    last_active_at TEXT,
+    daily_bonus_streak INTEGER NOT NULL DEFAULT 0,
+    last_daily_bonus TEXT,
+    ton_wallet TEXT,
+    invited_by INTEGER,
+    referral_code TEXT,
+    referrals_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS fact_progress (
@@ -115,10 +124,24 @@ def init_db():
     conn = get_connection()
     try:
         conn.executescript(SCHEMA)
-        conn.executemany(
-            "INSERT OR IGNORE INTO badges (code, title) VALUES (?, ?)",
-            BADGES_SEED,
-        )
+        
+        # Добавляем новые колонки для старых баз
+        new_columns = [
+            "ALTER TABLE users ADD COLUMN last_active_at TEXT",
+            "ALTER TABLE users ADD COLUMN daily_bonus_streak INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN last_daily_bonus TEXT",
+            "ALTER TABLE users ADD COLUMN ton_wallet TEXT",
+            "ALTER TABLE users ADD COLUMN invited_by INTEGER",
+            "ALTER TABLE users ADD COLUMN referral_code TEXT",
+            "ALTER TABLE users ADD COLUMN referrals_count INTEGER NOT NULL DEFAULT 0",
+        ]
+        
+        for sql in new_columns:
+            try:
+                conn.execute(sql)
+            except Exception:
+                pass  # Колонка уже есть
+        
         conn.commit()
     finally:
         conn.close()
@@ -387,5 +410,351 @@ def add_crystals(tg_id, amount, reason):
             (amount, tg_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def set_final_test_passed(tg_id):
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET final_test_passed = 1 WHERE tg_id = ?",
+            (tg_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def is_final_test_passed(tg_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT final_test_passed FROM users WHERE tg_id = ?", (tg_id,)
+        ).fetchone()
+        return row["final_test_passed"] == 1 if row else False
+    finally:
+        conn.close()
+
+
+def set_prizm_address(tg_id, address):
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET prizm_address = ? WHERE tg_id = ?",
+            (address, tg_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_prizm_address(tg_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT prizm_address FROM users WHERE tg_id = ?", (tg_id,)
+        ).fetchone()
+        return row["prizm_address"] if row else None
+    finally:
+        conn.close()
+
+
+def reset_user_progress(tg_id):
+    conn = get_connection()
+    try:
+        conn.execute(
+            """UPDATE users SET 
+               crystals = 0,
+               final_test_passed = 0,
+               prizm_address = NULL
+               WHERE tg_id = ?""",
+            (tg_id,),
+        )
+        # Удаляем все записи о пройденном контенте
+        conn.execute("DELETE FROM fact_progress WHERE tg_id = ?", (tg_id,))
+        conn.execute("DELETE FROM quest_progress WHERE tg_id = ?", (tg_id,))
+        conn.execute("DELETE FROM myth_progress WHERE tg_id = ?", (tg_id,))
+        conn.execute("DELETE FROM word_progress WHERE tg_id = ?", (tg_id,))
+        conn.execute("DELETE FROM user_badges WHERE tg_id = ?", (tg_id,))
+        conn.execute("DELETE FROM crystals_ledger WHERE tg_id = ?", (tg_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+        # === АДМИН-КОМАНДЫ И СТАТИСТИКА ===
+
+def create_reward_claim(tg_id, code, reward_type, wallet_address, status="pending_manual"):
+    """Создать заявку на награду"""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO rewards (tg_id, code, reward_type, status, wallet_address)
+               VALUES (?, ?, ?, ?, ?)""",
+            (tg_id, code, reward_type, status, wallet_address),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_pending_claims():
+    """Получить все заявки со статусом pending_manual"""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            """SELECT r.*, u.username, u.first_name 
+               FROM rewards r
+               JOIN users u ON r.tg_id = u.tg_id
+               WHERE r.status = 'pending_manual'
+               ORDER BY r.created_at DESC""",
+        )
+        return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def mark_reward_paid(tg_id, code):
+    """Отметить выплату как выполненную"""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """UPDATE rewards 
+               SET status = 'paid', updated_at = datetime('now')
+               WHERE tg_id = ? AND code = ?""",
+            (tg_id, code),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_user_full_info(tg_id):
+    """Полная информация о пользователе"""
+    conn = get_connection()
+    try:
+        # Основная информация
+        user = conn.execute(
+            "SELECT * FROM users WHERE tg_id = ?", (tg_id,)
+        ).fetchone()
+        
+        if not user:
+            return None
+        
+        info = dict(user)
+        
+        # Прогресс по фактам
+        facts = conn.execute(
+            "SELECT COUNT(*) as total, SUM(is_correct) as correct FROM fact_progress WHERE tg_id = ?",
+            (tg_id,),
+        ).fetchone()
+        info["facts_total"] = facts["total"]
+        info["facts_correct"] = facts["correct"] or 0
+        
+        # Прогресс по квесту
+        quest = conn.execute(
+            "SELECT COUNT(*) as completed FROM quest_progress WHERE tg_id = ?",
+            (tg_id,),
+        ).fetchone()
+        info["quest_completed"] = quest["completed"]
+        
+        # Прогресс по мифам
+        myths = conn.execute(
+            "SELECT COUNT(*) as total, SUM(is_correct) as correct FROM myth_progress WHERE tg_id = ?",
+            (tg_id,),
+        ).fetchone()
+        info["myths_total"] = myths["total"]
+        info["myths_correct"] = myths["correct"] or 0
+        
+        # Прогресс по словам
+        words = conn.execute(
+            "SELECT COUNT(*) as total, SUM(is_correct) as correct FROM word_progress WHERE tg_id = ?",
+            (tg_id,),
+        ).fetchone()
+        info["words_total"] = words["total"]
+        info["words_correct"] = words["correct"] or 0
+        
+        # Бейджи
+        badges = conn.execute(
+            "SELECT badge_code FROM user_badges WHERE tg_id = ?",
+            (tg_id,),
+        ).fetchall()
+        info["badges"] = [b["badge_code"] for b in badges]
+        
+        # Награды
+        rewards = conn.execute(
+            "SELECT * FROM rewards WHERE tg_id = ? ORDER BY created_at DESC",
+            (tg_id,),
+        ).fetchall()
+        info["rewards"] = [dict(r) for r in rewards]
+        
+        # Кто пригласил
+        if info.get("invited_by"):
+            inviter = conn.execute(
+                "SELECT username, first_name FROM users WHERE tg_id = ?",
+                (info["invited_by"],),
+            ).fetchone()
+            info["inviter_username"] = inviter["username"] if inviter else None
+            info["inviter_name"] = inviter["first_name"] if inviter else None
+        
+        # Сколько пригласил
+        referrals = conn.execute(
+            "SELECT COUNT(*) as count FROM users WHERE invited_by = ?",
+            (tg_id,),
+        ).fetchone()
+        info["referrals_count_actual"] = referrals["count"]
+        
+        return info
+    finally:
+        conn.close()
+
+
+def get_stats():
+    """Общая статистика бота"""
+    conn = get_connection()
+    try:
+        stats = {}
+        
+        # Всего пользователей
+        stats["total_users"] = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        
+        # Активные за 7 дней
+        stats["active_7d"] = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active_at >= datetime('now', '-7 days')"
+        ).fetchone()[0]
+        
+        # Активные за 30 дней
+        stats["active_30d"] = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active_at >= datetime('now', '-30 days')"
+        ).fetchone()[0]
+        
+        # Прошли квест (хотя бы 1 шаг)
+        stats["quest_started"] = conn.execute(
+            "SELECT COUNT(DISTINCT tg_id) FROM quest_progress"
+        ).fetchone()[0]
+        
+        # Прошли финальный тест
+        stats["test_passed"] = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE final_test_passed = 1"
+        ).fetchone()[0]
+        
+        # Запросили награду
+        stats["reward_claimed"] = conn.execute(
+            "SELECT COUNT(DISTINCT tg_id) FROM rewards"
+        ).fetchone()[0]
+        
+        # Получили выплату
+        stats["reward_paid"] = conn.execute(
+            "SELECT COUNT(DISTINCT tg_id) FROM rewards WHERE status = 'paid'"
+        ).fetchone()[0]
+        
+        # Ожидают выплаты
+        stats["reward_pending"] = conn.execute(
+            "SELECT COUNT(DISTINCT tg_id) FROM rewards WHERE status = 'pending_manual'"
+        ).fetchone()[0]
+        
+        return stats
+    finally:
+        conn.close()
+
+
+def get_all_users_tg_ids():
+    """Получить все ID пользователей (для рассылки)"""
+    conn = get_connection()
+    try:
+        cursor = conn.execute("SELECT tg_id FROM users")
+        return [row["tg_id"] for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_users_by_filter(filter_type):
+    """Получить пользователей по фильтру для рассылки"""
+    conn = get_connection()
+    try:
+        if filter_type == "active":
+            # Активные за 30 дней
+            cursor = conn.execute(
+                "SELECT tg_id FROM users WHERE last_active_at >= datetime('now', '-30 days')"
+            )
+        elif filter_type == "quest_done":
+            # Прошли квест (хотя бы 1 шаг)
+            cursor = conn.execute(
+                "SELECT DISTINCT tg_id FROM quest_progress"
+            )
+        elif filter_type == "quest_not_done":
+            # Не прошли квест
+            cursor = conn.execute(
+                """SELECT tg_id FROM users 
+                   WHERE tg_id NOT IN (SELECT DISTINCT tg_id FROM quest_progress)"""
+            )
+        elif filter_type == "inactive":
+            # Не заходили 7+ дней
+            cursor = conn.execute(
+                """SELECT tg_id FROM users 
+                   WHERE last_active_at < datetime('now', '-7 days') 
+                   OR last_active_at IS NULL"""
+            )
+        else:
+            # Все пользователи
+            cursor = conn.execute("SELECT tg_id FROM users")
+        
+        return [row["tg_id"] for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def update_last_active(tg_id):
+    """Обновить время последней активности"""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET last_active_at = datetime('now') WHERE tg_id = ?",
+            (tg_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def export_to_csv():
+    """Экспорт всех данных в CSV формат"""
+    conn = get_connection()
+    try:
+        # Пользователи
+        users = conn.execute("SELECT * FROM users").fetchall()
+        
+        # Формируем CSV
+        import csv
+        import io
+        
+        output = io.StringIO()
+        
+        # Пользователи
+        output.write("=== USERS ===\n")
+        if users:
+            writer = csv.DictWriter(output, fieldnames=users[0].keys())
+            writer.writeheader()
+            for user in users:
+                writer.writerow(dict(user))
+        
+        output.write("\n=== REWARDS ===\n")
+        rewards = conn.execute("SELECT * FROM rewards").fetchall()
+        if rewards:
+            writer = csv.DictWriter(output, fieldnames=rewards[0].keys())
+            writer.writeheader()
+            for reward in rewards:
+                writer.writerow(dict(reward))
+        
+        output.write("\n=== USER_BADGES ===\n")
+        badges = conn.execute("SELECT * FROM user_badges").fetchall()
+        if badges:
+            writer = csv.DictWriter(output, fieldnames=badges[0].keys())
+            writer.writeheader()
+            for badge in badges:
+                writer.writerow(dict(badge))
+        
+        return output.getvalue()
     finally:
         conn.close()

@@ -17,11 +17,14 @@ def main_menu_kb():
         types.InlineKeyboardButton("🔷 Факты", callback_data="menu:facts"),
     )
     markup.add(
-        types.InlineKeyboardButton("🎮 Игры", callback_data="menu:games"),
+        types.InlineKeyboardButton(" Игры", callback_data="menu:games"),
         types.InlineKeyboardButton("🏅 Бейджи", callback_data="menu:badges"),
     )
     markup.add(
-        types.InlineKeyboardButton("ℹ️ Помощь", callback_data="menu:help"),
+        types.InlineKeyboardButton("🎓 Финальный тест", callback_data="test:start"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("️ Помощь", callback_data="menu:help"),
     )
     return markup
 
@@ -155,5 +158,61 @@ def next_word_kb():
     )
     markup.add(
         types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+def final_test_start_kb():
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            "🎓 Начать финальный тест",
+            callback_data="test:start",
+        )
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+def final_test_answer_kb(question_id, options):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for index, option in enumerate(options):
+        markup.add(
+            types.InlineKeyboardButton(
+                option,
+                callback_data=f"test:ans:{question_id}:{index}",
+            )
+        )
+    return markup
+
+
+def final_test_next_kb():
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("➡️ Следующий вопрос", callback_data="test:next")
+    )
+    return markup
+
+
+def final_test_result_kb():
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🏆 Получить награду", callback_data="reward:claim")
+    )
+    markup.add(
+        types.InlineKeyboardButton(" Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+def final_test_retry_kb():
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🔄 Попробовать снова", callback_data="test:start")
+    )
+    markup.add(
+        types.InlineKeyboardButton(" Главное меню", callback_data="menu:home")
     )
     return markup
