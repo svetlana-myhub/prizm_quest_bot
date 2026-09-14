@@ -10,6 +10,12 @@ from telebot import types
 
 import db
 
+import sys
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
@@ -498,7 +504,7 @@ def start_alert_bot():
             break
         print("⚠️ Поллинг завершился сам. Перезапуск через 10 сек...")
         time.sleep(10)
-        
+
 
 if __name__ == "__main__":
     print("🚀 Prizm Alert Bot (v4 — картинки и адреса)")
