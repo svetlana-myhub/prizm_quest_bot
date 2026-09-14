@@ -16,6 +16,12 @@ try:
 except Exception:
     pass
 
+import logging                                  # ← НОВОЕ
+logging.basicConfig(level=logging.INFO,         # ← НОВОЕ
+                    stream=sys.stderr,
+                    format="%(asctime)s %(message)s")
+log = logging.info                              # ← НОВОЕ
+
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
@@ -44,7 +50,7 @@ domain_cache = {}  # {wallet_raw: (domain_or_None, timestamp)}
 
 def get_rates():
     global rates_cache
-    if time.time() - rates_cache["ts"] < 120:
+    if time.time() - rates_cache["ts"] < 60:
         return rates_cache["pzm_usd"], rates_cache["ton_usd"], rates_cache["diff_24h"]
     try:
         url = f"{TONAPI}/rates?tokens=ton,{PZM_JETTON}&currencies=usd"
@@ -55,7 +61,7 @@ def get_rates():
         rates_cache = {"pzm_usd": pzm, "ton_usd": ton, "diff_24h": diff, "ts": time.time()}
         return pzm, ton, diff
     except Exception as e:
-        print(f"⚠️ Ошибка курсов: {e}")
+        log(f"⚠️ Ошибка курсов: {e}")
         return rates_cache["pzm_usd"], rates_cache["ton_usd"], rates_cache["diff_24h"]
 
 
@@ -67,7 +73,7 @@ def get_pool_reserves():
             stack = r["result"]["stack"]
             return int(stack[0][1], 16) / 1e9, int(stack[1][1], 16) / 100
     except Exception as e:
-        print(f"⚠️ Ошибка резервов: {e}")
+        log(f"⚠️ Ошибка резервов: {e}")
     return None, None
 
 
@@ -156,6 +162,12 @@ def is_admin(chat_id, user_id):
 def fmt_num(x):
     return f"{x:,.2f}".replace(",", " ")
 
+def fmt_token(x):
+    s = f"{x:,.4f}".replace(",", " ")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
+
 
 def settings_markup(row):
     mark = types.InlineKeyboardMarkup()
@@ -171,6 +183,10 @@ def settings_markup(row):
     mark.add(types.InlineKeyboardButton(
         f"🔍 Показывать: {filter_labels.get(f, 'Все')}",
         callback_data="alert_filter"))
+
+    thread = row.get("thread_id")
+    thread_txt = f"📌 Куда: тема #{thread}" if thread else "📌 Куда: общая лента"
+    mark.add(types.InlineKeyboardButton(thread_txt, callback_data="alert_thread"))
     
     mark.add(types.InlineKeyboardButton(
         f"💰 Мин. объём: {fmt_num(row['min_volume_pzm'])} PZM",
@@ -239,13 +255,18 @@ def test_alert(message):
     if row is None:
         db.alert_upsert(chat.id, chat.title or "Личный чат", chat.type)
         row = db.alert_get(chat.id)
-    sample = ("🟢 Покупка PZM на DeDust (тест)\n"
-              "💎 1 000.00 PZM (~$1.40)\n"
-              "💵 Заплачено: 0.72 GRAM\n"
-              "👛 Покупатель: UQAA...28YbW\n"
-              "📈 Курс PZM: $0.001400\n"
-              "📊 24ч: +6.75%\n"
-              "🕒 тест")
+    pzm_usd, ton_usd, diff = get_rates()
+    now = datetime.now(timezone.utc).strftime("%d.%m %H:%M UTC")
+    sample = (
+        "🟢 Покупка PZM на DeDust (превью)\n"
+        f"🟣 1 000.00 PZM (~${1000 * pzm_usd:.2f})\n"
+        "💎 Заплачено: 0.72 GRAM\n"
+        "👛 Покупатель: alice.ton\n"
+        "🔗 Txn: 4b2c7780...793494\n"
+        f"📈 Курс PZM: ${pzm_usd:.6f}\n"
+        f"📊 24ч: {diff}\n"
+        f"🕒 {now}"
+    )
     send_alert(row, sample, sample, is_buy=True)
 
 
@@ -273,6 +294,23 @@ def alert_callbacks(call):
         cur = row["min_volume_pzm"]
         nxt = steps[(steps.index(cur) + 1) % len(steps)] if cur in steps else 0
         db.alert_set_min(chat.id, nxt)
+    elif call.data == "alert_thread":
+        try:
+            chat_info = bot.get_chat(chat.id)
+        except Exception:
+            chat_info = None
+        if chat_info is None or not getattr(chat_info, "is_forum", False):
+            bot.answer_callback_query(call.id, "В этом чате нет тем — сообщения идут в общую ленту.")
+            return
+        waiting_photo[chat.id] = "thread_pick"
+        mark = types.InlineKeyboardMarkup()
+        mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
+        bot.send_message(chat.id,
+                         "📌 Пришлите любое сообщение ИЗ нужной темы — я запомню её.\n"
+                         "(Сообщение из общей ленты = публиковать в общую ленту.)",
+                         reply_markup=mark)
+        bot.answer_callback_query(call.id)
+        return        
     elif call.data == "alert_img":
         waiting_photo[chat.id] = True
         bot.answer_callback_query(call.id)
@@ -299,10 +337,37 @@ def alert_callbacks(call):
     bot.answer_callback_query(call.id, "Обновлено")
 
 
+@bot.callback_query_handler(func=lambda c: c.data == "thread_cancel")
+def thread_cancel(call):
+    waiting_photo.pop(call.message.chat.id, None)
+    bot.answer_callback_query(call.id, "Отменено.")
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+        pass
+
+
+@bot.message_handler(content_types=["text"],
+                     func=lambda m: waiting_photo.get(m.chat.id) == "thread_pick")
+def pick_thread(message):
+    chat = message.chat
+    if chat.type in ("group", "supergroup") and not is_admin(chat.id, message.from_user.id):
+        return
+    thread_id = getattr(message, "message_thread_id", None)
+    if thread_id:
+        db.alert_set_thread(chat.id, thread_id)
+        bot.send_message(chat.id, f"✅ Оповещения будут публиковаться в тему #{thread_id}.",
+                         message_thread_id=thread_id)
+    else:
+        db.alert_reset_thread(chat.id)
+        bot.send_message(chat.id, "✅ Оповещения будут публиковаться в общую ленту.")
+    waiting_photo.pop(chat.id, None)
+
+
 @bot.message_handler(content_types=["photo"])
 def save_photo(message):
     chat = message.chat
-    if not waiting_photo.get(chat.id):
+    if waiting_photo.get(chat.id) is not True:
         return
     if chat.type in ("group", "supergroup", "channel"):
         if not is_admin(chat.id, message.from_user.id):
@@ -372,14 +437,14 @@ def parse_trade(event):
         time_str = datetime.fromtimestamp(event["timestamp"], tz=timezone.utc).strftime("%d.%m %H:%M UTC")
 
         head = "🟢 Покупка PZM на DeDust" if is_buy else "🔴 Продажа PZM на DeDust"
-        plain = [head, f"🟣 {fmt_num(pzm_amount)} PZM (~${usd_value:.2f})"]
+        plain = [head, f"🟣 {fmt_token(pzm_amount)} PZM (~${usd_value:.2f})"]
         html = list(plain)
 
         # Эмодзи оплаты зависит от токена
         pay_emoji = {"GRAM": "💎", "TON": "💎", "USD₮": "💲", "USDT": "💲"}.get(other_sym, "💵")
         if other_amount is not None:
             verb = "Заплачено" if is_buy else "Получено"
-            line = f"{pay_emoji} {verb}: {fmt_num(other_amount)} {other_sym}"
+            line = f"{pay_emoji} {verb}: {fmt_token(other_amount)} {other_sym}"
             plain.append(line)
             html.append(line)
         
@@ -413,25 +478,42 @@ def parse_trade(event):
     return None, None, 0, False
 
 
+CHANNEL_URL = "https://t.me/prizm"
+
+
 def send_alert(row, plain, html, is_buy):
     img = row.get("image_file_id")
-    
-    # Кнопка "Купить" только для покупок
-    markup = None
-    if is_buy:
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🟣 Купить PZM", url=BUY_URL))
-    
-    try:
+    thread_id = row.get("thread_id")
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🟣 Купить PZM", url=BUY_URL))
+    markup.add(types.InlineKeyboardButton("📢 Канал PRIZM", url=CHANNEL_URL))
+
+    def _send(thread):
         if img:
-            bot.send_photo(row["chat_id"], img, caption=html, parse_mode="HTML", reply_markup=markup)
+            bot.send_photo(row["chat_id"], img, caption=html, parse_mode="HTML",
+                           reply_markup=markup, message_thread_id=thread)
         elif os.path.exists(DEFAULT_IMAGE):
             with open(DEFAULT_IMAGE, "rb") as f:
-                bot.send_photo(row["chat_id"], f, caption=html, parse_mode="HTML", reply_markup=markup)
+                bot.send_photo(row["chat_id"], f, caption=html, parse_mode="HTML",
+                               reply_markup=markup, message_thread_id=thread)
         else:
-            bot.send_message(row["chat_id"], html, parse_mode="HTML", reply_markup=markup)
+            bot.send_message(row["chat_id"], html, parse_mode="HTML",
+                             reply_markup=markup, message_thread_id=thread)
+
+    try:
+        _send(thread_id)
     except Exception as e:
-        print(f"⚠️ Не удалось отправить в {row['chat_id']}: {e} — убираю чат")
+        if thread_id:
+            # Тема удалена/недоступна — шлём в общую ленту и сбрасываем настройку
+            log(f"⚠️ Тема {thread_id} недоступна в {row['chat_id']}: {e} — шлю в общую ленту")
+            db.alert_reset_thread(row["chat_id"])
+            try:
+                _send(None)
+                return
+            except Exception as e2:
+                e = e2
+        log(f"⚠️ Не удалось отправить в {row['chat_id']}: {e} — убираю чат")
         db.alert_remove(row["chat_id"])
 
 
@@ -450,14 +532,14 @@ def broadcast(plain, html, pzm_amount, is_buy):
 
 def monitor_trades():
     global last_seen_ts
-    print("🚀 Монитор сделок запущен...")
+    log("🚀 Монитор сделок запущен...")
     try:
         r = requests.get(f"{TONAPI}/accounts/{PZM_POOL}/events?limit=10", timeout=10).json()
         events = r.get("events", [])
         if events:
             last_seen_ts = max(e["timestamp"] for e in events)
     except Exception as e:
-        print(f"⚠️ Ошибка инициализации: {e}")
+        log(f"⚠️ Ошибка инициализации: {e}")
 
     fails = 0
     while True:
@@ -468,18 +550,18 @@ def monitor_trades():
             for event in sorted(new_events, key=lambda e: e["timestamp"]):
                 plain, html, pzm_amount, is_buy = parse_trade(event)
                 if plain:
-                    print(plain)
+                    log(plain)
                     broadcast(plain, html, pzm_amount, is_buy)
             if events:
                 last_seen_ts = max(e["timestamp"] for e in events)
         except requests.exceptions.ConnectionError:
             fails += 1
-            print(f"⚠️ Нет связи с tonapi.io (попытка {fails}). Жду...")
+            log(f"⚠️ Нет связи с tonapi.io (попытка {fails}). Жду...")
             time.sleep(15 if fails < 3 else 60)
             continue
         except Exception as e:
             fails += 1
-            print(f"❌ Ошибка мониторинга: {e}")
+            log(f"❌ Ошибка мониторинга: {e}")
             time.sleep(15 if fails < 3 else 60)
             continue
         fails = 0
@@ -495,18 +577,18 @@ def start_alert_bot():
         try:
             bot.infinity_polling(timeout=10, long_polling_timeout=10)
         except Exception as e:
-            print(f"⚠️ Поллинг упал: {e}. Перезапуск через 10 сек...")
+            log(f"⚠️ Поллинг упал: {e}. Перезапуск через 10 сек...")
             time.sleep(10)
             continue
         # Поллинг вернулся сам без исключения
         if time.time() - started < 5:
-            print("🛑 Поллинг остановлен оператором. Завершаем работу.")
+            log("🛑 Поллинг остановлен оператором. Завершаем работу.")
             break
-        print("⚠️ Поллинг завершился сам. Перезапуск через 10 сек...")
+        log("⚠️ Поллинг завершился сам. Перезапуск через 10 сек...")
         time.sleep(10)
 
 
 if __name__ == "__main__":
-    print("🚀 Prizm Alert Bot (v4 — картинки и адреса)")
-    print("=" * 55)
+    log("🚀 Prizm Alert Bot (v4 — картинки и адреса)")
+    log("=" * 55)
     start_alert_bot()
