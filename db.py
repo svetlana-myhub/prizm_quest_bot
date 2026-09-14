@@ -758,3 +758,98 @@ def export_to_csv():
         return output.getvalue()
     finally:
         conn.close()
+
+
+        # ========== ЧАТЫ ОПОВЕЩЕНИЙ ==========
+
+def init_alert_chats():
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS alert_chats (
+                chat_id INTEGER PRIMARY KEY,
+                title TEXT,
+                chat_type TEXT,
+                trades_on INTEGER DEFAULT 1,
+                min_volume_pzm REAL DEFAULT 0,
+                added_at TEXT
+            )""")
+
+        try:
+            con.execute("ALTER TABLE alert_chats ADD COLUMN image_file_id TEXT")
+        except sqlite3.OperationalError:
+            pass  # колонка уже есть
+
+        try:
+           con.execute("ALTER TABLE alert_chats ADD COLUMN thread_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            con.execute("ALTER TABLE alert_chats ADD COLUMN trade_filter TEXT DEFAULT 'all'")
+        except sqlite3.OperationalError:
+            pass
+
+
+def alert_set_thread(chat_id, thread_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET thread_id=? WHERE chat_id=?", (thread_id, chat_id))
+
+def alert_reset_thread(chat_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET thread_id=NULL WHERE chat_id=?", (chat_id,))
+
+def alert_reset_thread(chat_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET thread_id=NULL WHERE chat_id=?", (chat_id,))
+
+def alert_upsert(chat_id, title, chat_type, trades_on=1):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("""
+            INSERT INTO alert_chats (chat_id, title, chat_type, trades_on, added_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(chat_id) DO UPDATE SET title=excluded.title""",
+            (chat_id, title, chat_type, trades_on))
+
+
+def alert_remove(chat_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("DELETE FROM alert_chats WHERE chat_id=?", (chat_id,))
+
+
+def alert_get(chat_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.row_factory = sqlite3.Row
+        row = con.execute("SELECT * FROM alert_chats WHERE chat_id=?", (chat_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def alert_get_enabled():
+    with sqlite3.connect(DB_PATH) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute("SELECT * FROM alert_chats WHERE trades_on=1").fetchall()
+    return [dict(r) for r in rows]
+
+
+def alert_toggle(chat_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET trades_on = 1 - trades_on WHERE chat_id=?", (chat_id,))
+
+
+def alert_set_min(chat_id, value):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET min_volume_pzm=? WHERE chat_id=?", (value, chat_id))
+
+
+def alert_set_image(chat_id, file_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET image_file_id=? WHERE chat_id=?", (file_id, chat_id))
+
+
+def alert_reset_image(chat_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET image_file_id=NULL WHERE chat_id=?", (chat_id,))
+
+
+def alert_set_filter(chat_id, value):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET trade_filter=? WHERE chat_id=?", (value, chat_id))
