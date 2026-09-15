@@ -504,17 +504,21 @@ def save_photo(message):
 def my_chat_member(update):
     chat = update.chat
     status = update.new_chat_member.status
+    print(f"📥 my_chat_member: chat={chat.id} type={chat.type} status={status}")
     if status in ("member", "administrator"):
         if chat.type == "private":
             db.alert_upsert(chat.id, chat.title or "Личный чат", chat.type, trades_on=0)
         else:
-            db.alert_upsert(chat.id, chat.title or "Чат", chat.type)
+            try:
+                db.alert_upsert(chat.id, chat.title or "Чат", chat.type)
+            except Exception as e:
+                print(f"⚠️ Не удалось записать чат в базу: {e}")
             try:
                 bot.send_message(chat.id, (
                     "👋 Я подключён! Буду публиковать здесь сделки с PZM на DeDust.\n\n"
                     "Администраторы: /alert — настройки, /testalert — проверка."))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"⚠️ Не удалось поприветствовать: {e}")
     elif status in ("left", "kicked"):
         db.alert_remove(chat.id)
 
@@ -710,7 +714,8 @@ def start_alert_bot():
     while True:
         started = time.time()
         try:
-            bot.infinity_polling(timeout=10, long_polling_timeout=10)
+            bot.infinity_polling(timeout=10, long_polling_timeout=10,
+                                 allowed_updates=["message", "callback_query", "my_chat_member"])
         except Exception as e:
             log(f"⚠️ Поллинг упал: {e}. Перезапуск через 10 сек...")
             time.sleep(10)
