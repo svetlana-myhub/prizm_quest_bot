@@ -277,6 +277,21 @@ def start_private(message):
         "/testalert — тестовое сообщение с картинкой"))
 
 
+@bot.message_handler(commands=["add"])
+def add_cmd(message):
+    bot_name = "swap_pzm_bot"
+    link = (f"https://t.me/{bot_name}?startgroup=true"
+            "&admin=change_info+delete_messages+pin_messages")
+    text = (
+        f"➕ <b>Добавить меня в группу</b>\n\n"
+        f"Нажмите кнопку ниже — откроется список ваших групп и каналов. "
+        f"Выберите нужный, и я подключусь с нужными правами автоматически.\n\n"
+        f"<a href=\"{link}\">👉 Добавить бота в группу</a>"
+    )
+    bot.send_message(message.chat.id, text, parse_mode="HTML",
+                     message_thread_id=mthread(message))
+    
+
 @bot.message_handler(commands=["rate"])
 def rate_cmd(message):
     pzm_usd, ton_usd, diff = get_rates()
@@ -683,6 +698,7 @@ def start_alert_bot():
     """Точка входа: монитор + поллинг бота (для WSGI)"""
     try:
         bot.set_my_commands([
+            types.BotCommand("add", "добавить бота в группу"),
             types.BotCommand("rate", "текущий курс PZM"),
             types.BotCommand("alert", "настройки оповещений"),
             types.BotCommand("testalert", "тестовое сообщение с картинкой"),
