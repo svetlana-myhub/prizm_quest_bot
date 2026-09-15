@@ -45,6 +45,9 @@ last_seen_ts = 0
 rates_cache = {"pzm_usd": 0.0013, "ton_usd": 1.36, "diff_24h": "—", "ts": 0}
 waiting_photo = {}
 domain_cache = {}  # {wallet_raw: (domain_or_None, timestamp)}
+thread_prompt = {}
+pending_thread = {}
+holders_cache = {"counts": None, "ts": 0}
 
 # ========== ДАННЫЕ ==========
 
@@ -63,6 +66,38 @@ def get_rates():
     except Exception as e:
         log(f"⚠️ Ошибка курсов: {e}")
         return rates_cache["pzm_usd"], rates_cache["ton_usd"], rates_cache["diff_24h"]
+
+def get_holders_counts():
+    """Количество холдеров по категориям (кэш 10 минут)"""
+    if holders_cache["counts"] is not None and time.time() - holders_cache["ts"] < 600:
+        return holders_cache["counts"]
+    try:
+        r = requests.get(f"{TONAPI}/jettons/{PZM_JETTON}/holders?limit=1000", timeout=10).json()
+        c = {"1-49": 0, "50": 0, "100": 0}
+        for h in r.get("addresses", []):
+            bal = int(h.get("balance", 0)) / 100
+            if 1 <= bal <= 49:
+                c["1-49"] += 1
+            if bal >= 50:
+                c["50"] += 1
+            if bal >= 100:
+                c["100"] += 1
+        holders_cache["counts"] = c
+        holders_cache["ts"] = time.time()
+        return c
+    except Exception as e:
+        print(f"⚠️ Ошибка получения холдеров: {e}")
+        return holders_cache["counts"]
+
+
+def fill_holders(plain, html, counts, mode):
+    """Подставить число холдеров нужной категории (или убрать строку)"""
+    if counts:
+        return (plain.replace("{HOLDERS}", str(counts.get(mode, "?"))),
+                html.replace("{HOLDERS}", str(counts.get(mode, "?"))))
+    drop = "👥 Holders: {HOLDERS}\n"
+    return (plain.replace(drop, "").replace("👥 Holders: {HOLDERS}", ""),
+            html.replace(drop, "").replace("👥 Holders: {HOLDERS}", ""))
 
 
 def get_pool_reserves():
@@ -148,6 +183,16 @@ def display_wallet(wallet_raw: str) -> tuple:
     except Exception:
         return wallet_raw[:10] + "...", wallet_raw[:10] + "..."
 
+def get_topic_name(chat_id, thread_id):
+    """Название темы по служебному сообщению о её создании"""
+    try:
+        for m in bot.get_chat_history(chat_id, limit=200):
+            if getattr(m, "message_thread_id", None) == thread_id and \
+                    getattr(m, "message_forum_topic_created", None) is not None:
+                return m.message_forum_topic_created.name
+    except Exception as e:
+        print(f"⚠️ Не удалось прочитать название темы: {e}")
+    return None
 
 # ========== ПОМОЩНИКИ ==========
 
@@ -168,6 +213,10 @@ def fmt_token(x):
         s = s.rstrip("0").rstrip(".")
     return s
 
+def mthread(message):
+    """ID темы, из которой пришло сообщение (None = главная)"""
+    return getattr(message, "message_thread_id", None)
+
 
 def settings_markup(row):
     mark = types.InlineKeyboardMarkup()
@@ -184,9 +233,17 @@ def settings_markup(row):
         f"🔍 Показывать: {filter_labels.get(f, 'Все')}",
         callback_data="alert_filter"))
 
+    mode = row.get("holders_mode") or "50"
+    labels = {"1-49": "1-49 PZM", "50": "50+ PZM", "100": "100+ PZM"}
+    mark.add(types.InlineKeyboardButton(
+        f"👥 Холдеры: {labels.get(mode, '50+ PZM')}", callback_data="alert_holders"))
+
     thread = row.get("thread_id")
-    thread_txt = f"📌 Куда: тема #{thread}" if thread else "📌 Куда: общая лента"
-    mark.add(types.InlineKeyboardButton(thread_txt, callback_data="alert_thread"))
+    if thread:
+        tname = row.get("thread_title") or f"тема #{thread}"
+        mark.add(types.InlineKeyboardButton(f"📌 Куда: {tname}", callback_data="alert_thread"))
+    else:
+        mark.add(types.InlineKeyboardButton("📌 Куда: главная тема", callback_data="alert_thread"))
     
     mark.add(types.InlineKeyboardButton(
         f"💰 Мин. объём: {fmt_num(row['min_volume_pzm'])} PZM",
@@ -228,7 +285,7 @@ def rate_cmd(message):
     if ton_r and pzm_r:
         text += f"\n💱 В GRAM: {ton_r / pzm_r:.6f} GRAM за PZM"
         text += f"\n📊 Ликвидность пула: {fmt_num(pzm_r)} PZM / {fmt_num(ton_r)} GRAM"
-    bot.send_message(message.chat.id, text)
+    bot.send_message(message.chat.id, text, message_thread_id=mthread(message))
 
 
 @bot.message_handler(commands=["alert"])
@@ -242,7 +299,7 @@ def alert_cmd(message):
     if row is None:
         db.alert_upsert(chat.id, chat.title or "Личный чат", chat.type)
         row = db.alert_get(chat.id)
-    bot.send_message(chat.id, settings_text(row), reply_markup=settings_markup(row))
+    bot.send_message(chat.id, settings_text(row), reply_markup=settings_markup(row), message_thread_id=mthread(message))
 
 
 @bot.message_handler(commands=["testalert"])
@@ -263,11 +320,14 @@ def test_alert(message):
         "💎 Заплачено: 0.72 GRAM\n"
         "👛 Покупатель: alice.ton\n"
         "🔗 Txn: 4b2c7780...793494\n"
+        "👥 Holders: {HOLDERS}\n"
         f"📈 Курс PZM: ${pzm_usd:.6f}\n"
         f"📊 24ч: {diff}\n"
         f"🕒 {now}"
     )
-    send_alert(row, sample, sample, is_buy=True)
+    counts = get_holders_counts()
+    sample, _ = fill_holders(sample, sample, counts, row.get("holders_mode") or "50")
+    send_alert(row, sample, sample, is_buy=True, thread_override=mthread(message))
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("alert_"))
@@ -294,23 +354,35 @@ def alert_callbacks(call):
         cur = row["min_volume_pzm"]
         nxt = steps[(steps.index(cur) + 1) % len(steps)] if cur in steps else 0
         db.alert_set_min(chat.id, nxt)
+
+    elif call.data == "alert_holders":
+        cycle = {"1-49": "50", "50": "100", "100": "1-49"}
+        db.alert_set_holders_mode(chat.id, cycle.get(row.get("holders_mode") or "50", "50"))
+
+
     elif call.data == "alert_thread":
         try:
             chat_info = bot.get_chat(chat.id)
         except Exception:
             chat_info = None
         if chat_info is None or not getattr(chat_info, "is_forum", False):
-            bot.answer_callback_query(call.id, "В этом чате нет тем — сообщения идут в общую ленту.")
+            bot.answer_callback_query(call.id, "В этом чате нет тем — оповещения идут в главную тему.")
             return
         waiting_photo[chat.id] = "thread_pick"
         mark = types.InlineKeyboardMarkup()
         mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
-        bot.send_message(chat.id,
-                         "📌 Пришлите любое сообщение ИЗ нужной темы — я запомню её.\n"
-                         "(Сообщение из общей ленты = публиковать в общую ленту.)",
-                         reply_markup=mark)
+        sent = bot.send_message(
+            chat.id,
+            "✍️ Напишите любое сообщение в нужной теме, куда должны приходить "
+            "оповещения о сделках — я запомню её 📌\n"
+            "По умолчанию оповещения приходят в главную тему.",
+            reply_markup=mark,
+            message_thread_id=mthread(call.message))
+        thread_prompt[chat.id] = sent.message_id
         bot.answer_callback_query(call.id)
-        return        
+        return
+
+
     elif call.data == "alert_img":
         waiting_photo[chat.id] = True
         bot.answer_callback_query(call.id)
@@ -339,12 +411,15 @@ def alert_callbacks(call):
 
 @bot.callback_query_handler(func=lambda c: c.data == "thread_cancel")
 def thread_cancel(call):
-    waiting_photo.pop(call.message.chat.id, None)
+    chat = call.message.chat
+    waiting_photo.pop(chat.id, None)
+    msg_id = thread_prompt.pop(chat.id, None)
+    if msg_id:
+        try:
+            bot.delete_message(chat.id, msg_id)
+        except Exception:
+            pass
     bot.answer_callback_query(call.id, "Отменено.")
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except Exception:
-        pass
 
 
 @bot.message_handler(content_types=["text"],
@@ -353,16 +428,48 @@ def pick_thread(message):
     chat = message.chat
     if chat.type in ("group", "supergroup") and not is_admin(chat.id, message.from_user.id):
         return
-    thread_id = getattr(message, "message_thread_id", None)
-    if thread_id:
-        db.alert_set_thread(chat.id, thread_id)
-        bot.send_message(chat.id, f"✅ Оповещения будут публиковаться в тему #{thread_id}.",
+    msg_id = thread_prompt.pop(chat.id, None)
+    if msg_id:
+        try:
+            bot.delete_message(chat.id, msg_id)
+        except Exception:
+            pass
+    thread_id = mthread(message)
+    if not thread_id:
+        db.alert_reset_thread(chat.id)
+        waiting_photo.pop(chat.id, None)
+        bot.send_message(chat.id, "✅ Оповещения будут приходить в главную тему.")
+        return
+    title = get_topic_name(chat.id, thread_id)
+    db.alert_set_thread(chat.id, thread_id, title)
+    if title:
+        waiting_photo.pop(chat.id, None)
+        bot.send_message(chat.id, f"✅ Оповещения будут приходить в тему «{title}».",
                          message_thread_id=thread_id)
     else:
-        db.alert_reset_thread(chat.id)
-        bot.send_message(chat.id, "✅ Оповещения будут публиковаться в общую ленту.")
-    waiting_photo.pop(chat.id, None)
+        pending_thread[chat.id] = thread_id
+        waiting_photo[chat.id] = "thread_name"
+        bot.send_message(chat.id,
+                         "Название темы не нашлось автоматически (создана давно).\n"
+                         "✍️ Пришлите одним сообщением название темы для меню:",
+                         message_thread_id=thread_id)
 
+
+@bot.message_handler(content_types=["text"],
+                     func=lambda m: waiting_photo.get(m.chat.id) == "thread_name")
+def save_thread_name(message):
+    chat = message.chat
+    if chat.type in ("group", "supergroup") and not is_admin(chat.id, message.from_user.id):
+        return
+    thread_id = pending_thread.pop(chat.id, None)
+    waiting_photo.pop(chat.id, None)
+    if thread_id is None:
+        return
+    title = message.text.strip()[:64]
+    db.alert_set_thread_title(chat.id, title)
+    bot.send_message(chat.id, f"✅ Сохранено: оповещения в тему «{title}».",
+                     message_thread_id=thread_id)
+    
 
 @bot.message_handler(content_types=["photo"])
 def save_photo(message):
@@ -375,7 +482,7 @@ def save_photo(message):
     fid = message.photo[-1].file_id
     db.alert_set_image(chat.id, fid)
     waiting_photo.pop(chat.id, None)
-    bot.send_message(chat.id, "🖼 Картинка сохранена! Теперь оповещения будут приходить с ней.")
+    bot.send_message(chat.id, "🖼 Картинка сохранена! Теперь оповещения будут приходить с ней.", message_thread_id=mthread(message))
 
 
 @bot.my_chat_member_handler()
@@ -460,7 +567,10 @@ def parse_trade(event):
             txn_url = f"https://tonviewer.com/transaction/{event_id}"
             plain.append(f"🔗 Txn: {event_id[:8]}...{event_id[-6:]}")
             html.append(f'🔗 Txn: <a href="{txn_url}">{event_id[:8]}...{event_id[-6:]}</a>')
-        
+
+        plain.append("👥 Holders: {HOLDERS}")
+        html.append("👥 Holders: {HOLDERS}")
+
         line = f"📈 Курс PZM: ${pzm_usd:.6f}"
         plain.append(line)
         html.append(line)
@@ -481,9 +591,9 @@ def parse_trade(event):
 CHANNEL_URL = "https://t.me/prizm"
 
 
-def send_alert(row, plain, html, is_buy):
+def send_alert(row, plain, html, is_buy, thread_override="default"):
     img = row.get("image_file_id")
-    thread_id = row.get("thread_id")
+    thread_id = row.get("thread_id") if thread_override == "default" else thread_override
 
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🟣 Купить PZM", url=BUY_URL))
@@ -518,16 +628,17 @@ def send_alert(row, plain, html, is_buy):
 
 
 def broadcast(plain, html, pzm_amount, is_buy):
+    counts = get_holders_counts()
     for row in db.alert_get_enabled():
         if pzm_amount < row["min_volume_pzm"]:
             continue
-        # Фильтр по типу сделки
         f = row.get("trade_filter", "all")
         if f == "buys" and not is_buy:
             continue
         if f == "sells" and is_buy:
             continue
-        send_alert(row, plain, html, is_buy)
+        p2, h2 = fill_holders(plain, html, counts, row.get("holders_mode") or "50")
+        send_alert(row, p2, h2, is_buy)
 
 
 def monitor_trades():
@@ -570,6 +681,14 @@ def monitor_trades():
 
 def start_alert_bot():
     """Точка входа: монитор + поллинг бота (для WSGI)"""
+    try:
+        bot.set_my_commands([
+            types.BotCommand("rate", "текущий курс PZM"),
+            types.BotCommand("alert", "настройки оповещений"),
+            types.BotCommand("testalert", "тестовое сообщение с картинкой"),
+        ])
+    except Exception as e:
+        print(f"⚠️ Не удалось задать меню команд: {e}")    
     db.init_alert_chats()
     threading.Thread(target=monitor_trades, daemon=True).start()
     while True:

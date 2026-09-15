@@ -789,18 +789,33 @@ def init_alert_chats():
         except sqlite3.OperationalError:
             pass
 
+        try:
+            con.execute("ALTER TABLE alert_chats ADD COLUMN thread_title TEXT")
+        except sqlite3.OperationalError:
+            pass        
 
-def alert_set_thread(chat_id, thread_id):
+        try:
+            con.execute("ALTER TABLE alert_chats ADD COLUMN holders_mode TEXT DEFAULT '50'")
+        except sqlite3.OperationalError:
+            pass
+
+
+def alert_set_thread(chat_id, thread_id, title=None):
     with sqlite3.connect(DB_PATH) as con:
-        con.execute("UPDATE alert_chats SET thread_id=? WHERE chat_id=?", (thread_id, chat_id))
+        con.execute("UPDATE alert_chats SET thread_id=?, thread_title=? WHERE chat_id=?",
+                    (thread_id, title, chat_id))
+
+
+def alert_set_thread_title(chat_id, title):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET thread_title=? WHERE chat_id=?", (title, chat_id))
+
 
 def alert_reset_thread(chat_id):
     with sqlite3.connect(DB_PATH) as con:
-        con.execute("UPDATE alert_chats SET thread_id=NULL WHERE chat_id=?", (chat_id,))
+        con.execute("UPDATE alert_chats SET thread_id=NULL, thread_title=NULL WHERE chat_id=?",
+                    (chat_id,))
 
-def alert_reset_thread(chat_id):
-    with sqlite3.connect(DB_PATH) as con:
-        con.execute("UPDATE alert_chats SET thread_id=NULL WHERE chat_id=?", (chat_id,))
 
 def alert_upsert(chat_id, title, chat_type, trades_on=1):
     with sqlite3.connect(DB_PATH) as con:
@@ -853,3 +868,8 @@ def alert_reset_image(chat_id):
 def alert_set_filter(chat_id, value):
     with sqlite3.connect(DB_PATH) as con:
         con.execute("UPDATE alert_chats SET trade_filter=? WHERE chat_id=?", (value, chat_id))
+
+
+def alert_set_holders_mode(chat_id, mode):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET holders_mode=? WHERE chat_id=?", (mode, chat_id))        
