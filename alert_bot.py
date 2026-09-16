@@ -47,6 +47,7 @@ waiting_photo = {}
 domain_cache = {}  # {wallet_raw: (domain_or_None, timestamp)}
 thread_prompt = {}
 pending_thread = {}
+pending_image_target = {}
 holders_cache = {"counts": None, "ts": 0}
 
 # ========== ДАННЫЕ ==========
@@ -218,39 +219,33 @@ def mthread(message):
     return getattr(message, "message_thread_id", None)
 
 
-def settings_markup(row):
+def settings_markup(row, target=None):
+    suf = f":{target}" if target is not None else ""
     mark = types.InlineKeyboardMarkup()
-    
-    # Вкл/выкл
     mark.add(types.InlineKeyboardButton(
         "✅ Сделки: вкл" if row["trades_on"] else "❌ Сделки: выкл",
-        callback_data="alert_toggle"))
-    
-    # Фильтр: все / только покупки / только продажи
+        callback_data=f"alert_toggle{suf}"))
     f = row.get("trade_filter", "all")
     filter_labels = {"all": "Все", "buys": "Только покупки", "sells": "Только продажи"}
     mark.add(types.InlineKeyboardButton(
-        f"🔍 Показывать: {filter_labels.get(f, 'Все')}",
-        callback_data="alert_filter"))
-
+        f"🔍 Показывать: {filter_labels.get(f, 'Все')}", callback_data=f"alert_filter{suf}"))
+    mark.add(types.InlineKeyboardButton(
+        f"💰 Мин. объём: {fmt_num(row['min_volume_pzm'])} PZM", callback_data=f"alert_min{suf}"))
     mode = row.get("holders_mode") or "50"
     labels = {"1-49": "1-49 PZM", "50": "50+ PZM", "100": "100+ PZM"}
     mark.add(types.InlineKeyboardButton(
-        f"👥 Холдеры: {labels.get(mode, '50+ PZM')}", callback_data="alert_holders"))
-
+        f"👥 Холдеры: {labels.get(mode, '50+ PZM')}", callback_data=f"alert_holders{suf}"))
     thread = row.get("thread_id")
     if thread:
         tname = row.get("thread_title") or f"тема #{thread}"
-        mark.add(types.InlineKeyboardButton(f"📌 Куда: {tname}", callback_data="alert_thread"))
+        mark.add(types.InlineKeyboardButton(f"📌 Куда: {tname}", callback_data=f"alert_thread{suf}"))
     else:
-        mark.add(types.InlineKeyboardButton("📌 Куда: главная тема", callback_data="alert_thread"))
-    
-    mark.add(types.InlineKeyboardButton(
-        f"💰 Мин. объём: {fmt_num(row['min_volume_pzm'])} PZM",
-        callback_data="alert_min"))
-    mark.add(types.InlineKeyboardButton("🖼 Картинка: сменить", callback_data="alert_img"))
-    mark.add(types.InlineKeyboardButton("🖼 Картинка: сбросить", callback_data="alert_img_reset"))
-    mark.add(types.InlineKeyboardButton("🔕 Отключить оповещения", callback_data="alert_off"))
+        mark.add(types.InlineKeyboardButton("📌 Куда: главная тема", callback_data=f"alert_thread{suf}"))
+    mark.add(types.InlineKeyboardButton("🖼 Картинка: сменить", callback_data=f"alert_img{suf}"))
+    mark.add(types.InlineKeyboardButton("🖼 Картинка: сбросить", callback_data=f"alert_img_reset{suf}"))
+    mark.add(types.InlineKeyboardButton("👀 Предпросмотр", callback_data=f"alert_preview{suf}"))
+    mark.add(types.InlineKeyboardButton("📣 Тест оповещения в чате", callback_data=f"alert_test{suf}"))
+    mark.add(types.InlineKeyboardButton("🔕 Отключить оповещения", callback_data=f"alert_off{suf}"))
     return mark
 
 
@@ -267,13 +262,18 @@ def start_private(message):
     bot.send_message(message.chat.id, (
         "👋 Привет! Я публикую сделки с Prizm (PZM) на DeDust в чаты и каналы.\n\n"
         "Как подключить:\n"
-        "1️⃣ Добавьте меня в ваш канал или чат\n"
-        "   (в канал — с правом «Публиковать сообщения»)\n"
-        "2️⃣ Отправьте /alert — я открою настройки\n"
+        "1️⃣ Добавьте меня в ваш чат или канал\n"
+        "   (с правом «Публиковать сообщения»)\n\n"
+        "либо используйте команду /add — добавить бота в группу\n\n"
+        "2️⃣ Отправьте в чате /alert — я открою настройки\n"
         "   (настраивают только администраторы чата)\n\n"
-        "Команды:\n"
+        "либо отправьте в боте /chats — я настрою ваши чаты и каналы, "
+        "к которым подключен бот как администратор\n\n"
+        "Мои команды:\n"
         "/rate — текущий курс PZM\n"
         "/alert — настройки оповещений\n"
+        "/add — добавить бота в группу\n"
+        "/chats — мои чаты и каналы: настройки\n"
         "/testalert — тестовое сообщение с картинкой"))
 
 
@@ -284,8 +284,8 @@ def add_cmd(message):
             "&admin=change_info+delete_messages+pin_messages")
     text = (
         f"➕ <b>Добавить меня в группу</b>\n\n"
-        f"Нажмите кнопку ниже — откроется список ваших групп и каналов. "
-        f"Выберите нужный, и я подключусь с нужными правами автоматически.\n\n"
+        f"Нажмите ссылку ниже — откроется список ваших групп. "
+        f"Выберите нужную, и я подключусь с нужными правами автоматически.\n\n"
         f"<a href=\"{link}\">👉 Добавить бота в группу</a>"
     )
     bot.send_message(message.chat.id, text, parse_mode="HTML",
@@ -317,19 +317,10 @@ def alert_cmd(message):
     bot.send_message(chat.id, settings_text(row), reply_markup=settings_markup(row), message_thread_id=mthread(message))
 
 
-@bot.message_handler(commands=["testalert"])
-def test_alert(message):
-    chat = message.chat
-    if chat.type in ("group", "supergroup", "channel"):
-        if not is_admin(chat.id, message.from_user.id):
-            return
-    row = db.alert_get(chat.id)
-    if row is None:
-        db.alert_upsert(chat.id, chat.title or "Личный чат", chat.type)
-        row = db.alert_get(chat.id)
+def make_sample():
     pzm_usd, ton_usd, diff = get_rates()
     now = datetime.now(timezone.utc).strftime("%d.%m %H:%M UTC")
-    sample = (
+    return (
         "🟢 Покупка PZM на DeDust (превью)\n"
         f"🟣 1 000.00 PZM (~${1000 * pzm_usd:.2f})\n"
         "💎 Заплачено: 0.72 GRAM\n"
@@ -340,85 +331,168 @@ def test_alert(message):
         f"📊 24ч: {diff}\n"
         f"🕒 {now}"
     )
+
+@bot.message_handler(commands=["chats"], func=lambda m: m.chat.type != "private")
+def chats_cmd_group(message):
+    bot.send_message(message.chat.id,
+                     "ℹ️ Команда /chats работает в личной переписке с ботом.",
+                     message_thread_id=mthread(message))
+
+@bot.message_handler(commands=["chats"], func=lambda m: m.chat.type == "private")
+def chats_cmd(message):
+    items = []
+    for r in db.alert_get_all():
+        if r["chat_type"] == "private":
+            continue
+        try:
+            m = bot.get_chat_member(r["chat_id"], message.from_user.id)
+        except Exception:
+            continue
+        if m.status in ("creator", "administrator"):
+            items.append(r)
+    if not items:
+        bot.send_message(message.chat.id,
+                         "Не нашел чатов и каналов, где вы админ и я подключён.\n"
+                         "Добавьте меня через /add или через администраторов канала.")
+        return
+    mark = types.InlineKeyboardMarkup()
+    for r in items:
+        icon = "📢" if r["chat_type"] == "channel" else "👥"
+        mark.add(types.InlineKeyboardButton(f"{icon} {r['title']}",
+                                            callback_data=f"chat:{r['chat_id']}"))
+    bot.send_message(message.chat.id,
+                     "Ваши чаты и каналы — выберите для настройки:", reply_markup=mark)
+
+
+@bot.message_handler(commands=["testalert"])
+def test_alert(message):
+    chat = message.chat
+    if chat.type in ("group", "supergroup", "channel"):
+        if not is_admin(chat.id, message.from_user.id):
+            return
+    row = db.alert_get(chat.id)
+    if row is None:
+        db.alert_upsert(chat.id, chat.title or "Личный чат", chat.type)
+        row = db.alert_get(chat.id)
+    sample = make_sample()
     counts = get_holders_counts()
     sample, _ = fill_holders(sample, sample, counts, row.get("holders_mode") or "50")
     send_alert(row, sample, sample, is_buy=True, thread_override=mthread(message))
 
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("alert_"))
+@bot.callback_query_handler(func=lambda c: c.data.startswith("alert_") or c.data.startswith("chat:"))
 def alert_callbacks(call):
-    chat = call.message.chat
-    if chat.type in ("group", "supergroup", "channel"):
-        if not is_admin(chat.id, call.from_user.id):
+    data = call.data
+
+    # Выбор чата из личного списка
+    if data.startswith("chat:"):
+        target = int(data[5:])
+        row = db.alert_get(target)
+        if row is None or not is_admin(target, call.from_user.id):
+            bot.answer_callback_query(call.id, "Недоступно.")
+            return
+        bot.send_message(call.message.chat.id, settings_text(row),
+                         reply_markup=settings_markup(row, target))
+        bot.answer_callback_query(call.id)
+        return
+
+    action, _, tid = data.partition(":")
+    if tid:
+        cid = int(tid)
+        if not is_admin(cid, call.from_user.id):
             bot.answer_callback_query(call.id, "Только администраторы чата.")
             return
-    row = db.alert_get(chat.id)
+    else:
+        cid = call.message.chat.id
+        if call.message.chat.type in ("group", "supergroup", "channel"):
+            if not is_admin(cid, call.from_user.id):
+                bot.answer_callback_query(call.id, "Только администраторы чата.")
+                return
+
+    row = db.alert_get(cid)
     if row is None:
         bot.answer_callback_query(call.id, "Чат не подключён.")
         return
 
-    if call.data == "alert_toggle":
-        db.alert_toggle(chat.id)
-    elif call.data == "alert_filter":
-        # Переключаем: all → buys → sells → all
+    if action == "alert_toggle":
+        db.alert_toggle(cid)
+    elif action == "alert_filter":
         current = row.get("trade_filter", "all")
         cycle = {"all": "buys", "buys": "sells", "sells": "all"}
-        db.alert_set_filter(chat.id, cycle.get(current, "all"))
-    elif call.data == "alert_min":
+        db.alert_set_filter(cid, cycle.get(current, "all"))
+    elif action == "alert_min":
         steps = [0, 1000, 10000, 50000]
         cur = row["min_volume_pzm"]
         nxt = steps[(steps.index(cur) + 1) % len(steps)] if cur in steps else 0
-        db.alert_set_min(chat.id, nxt)
-
-    elif call.data == "alert_holders":
+        db.alert_set_min(cid, nxt)
+    elif action == "alert_holders":
         cycle = {"1-49": "50", "50": "100", "100": "1-49"}
-        db.alert_set_holders_mode(chat.id, cycle.get(row.get("holders_mode") or "50", "50"))
-
-
-    elif call.data == "alert_thread":
+        db.alert_set_holders_mode(cid, cycle.get(row.get("holders_mode") or "50", "50"))
+    elif action == "alert_thread":
+        if tid:
+            bot.answer_callback_query(call.id, "Настройка тем доступна через /alert внутри группы.")
+            return
         try:
-            chat_info = bot.get_chat(chat.id)
+            chat_info = bot.get_chat(cid)
         except Exception:
             chat_info = None
         if chat_info is None or not getattr(chat_info, "is_forum", False):
             bot.answer_callback_query(call.id, "В этом чате нет тем — оповещения идут в главную тему.")
             return
-        waiting_photo[chat.id] = "thread_pick"
+        waiting_photo[cid] = "thread_pick"
         mark = types.InlineKeyboardMarkup()
         mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
         sent = bot.send_message(
-            chat.id,
+            cid,
             "✍️ Напишите любое сообщение в нужной теме, куда должны приходить "
             "оповещения о сделках — я запомню её 📌\n"
             "По умолчанию оповещения приходят в главную тему.",
             reply_markup=mark,
             message_thread_id=mthread(call.message))
-        thread_prompt[chat.id] = sent.message_id
+        thread_prompt[cid] = sent.message_id
         bot.answer_callback_query(call.id)
         return
-
-
-    elif call.data == "alert_img":
-        waiting_photo[chat.id] = True
+    elif action == "alert_img":
+        waiting_photo[call.message.chat.id] = True
+        pending_image_target[call.message.chat.id] = int(tid) if tid else None
+        bot.send_message(call.message.chat.id,
+                         "🖼 Пришлите фото обычным сообщением — я сохраню его для оповещений.")
         bot.answer_callback_query(call.id)
-        bot.send_message(chat.id, "🖼 Пришлите фото в этот чат обычным сообщением — я сохраню его для оповещений.")
         return
-    elif call.data == "alert_img_reset":
-        db.alert_reset_image(chat.id)
-    elif call.data == "alert_off":
-        db.alert_remove(chat.id)
+    elif action == "alert_img_reset":
+        db.alert_reset_image(cid)
+    elif action == "alert_preview":
+        sample = make_sample()
+        counts = get_holders_counts()
+        sample, _ = fill_holders(sample, sample, counts, row.get("holders_mode") or "50")
+        try:
+            send_preview(call.message.chat.id, mthread(call.message), row, sample)
+            bot.answer_callback_query(call.id, "Вот как будет выглядеть оповещение.")
+        except Exception as e:
+            print(f"⚠️ Не удалось показать предпросмотр: {e}")
+            bot.answer_callback_query(call.id, "Не удалось показать предпросмотр.")
+        return        
+    elif action == "alert_test":
+        sample = make_sample()
+        counts = get_holders_counts()
+        sample, _ = fill_holders(sample, sample, counts, row.get("holders_mode") or "50")
+        send_alert(row, sample, sample, True)
+        bot.answer_callback_query(call.id, "Отправлено!")
+        return
+    elif action == "alert_off":
+        db.alert_remove(cid)
         bot.answer_callback_query(call.id, "Оповещения отключены.")
         try:
-            bot.edit_message_text("🔕 Оповещения отключены для этого чата. Вернуть: /alert",
-                                  chat.id, call.message.message_id)
+            bot.edit_message_text("🔕 Оповещения отключены для этого чата. Вернуть: /alert или /chats",
+                                  call.message.chat.id, call.message.message_id)
         except Exception:
             pass
         return
 
-    row = db.alert_get(chat.id)
+    row = db.alert_get(cid)
     try:
-        bot.edit_message_text(settings_text(row), chat.id, call.message.message_id,
-                              reply_markup=settings_markup(row))
+        bot.edit_message_text(settings_text(row), call.message.chat.id, call.message.message_id,
+                              reply_markup=settings_markup(row, int(tid) if tid else None))
     except Exception:
         pass
     bot.answer_callback_query(call.id, "Обновлено")
@@ -491,13 +565,17 @@ def save_photo(message):
     chat = message.chat
     if waiting_photo.get(chat.id) is not True:
         return
-    if chat.type in ("group", "supergroup", "channel"):
+    target = pending_image_target.pop(chat.id, None) or chat.id
+    waiting_photo.pop(chat.id, None)
+    if target != chat.id:
+        if not is_admin(target, message.from_user.id):
+            return
+    elif chat.type in ("group", "supergroup", "channel"):
         if not is_admin(chat.id, message.from_user.id):
             return
     fid = message.photo[-1].file_id
-    db.alert_set_image(chat.id, fid)
-    waiting_photo.pop(chat.id, None)
-    bot.send_message(chat.id, "🖼 Картинка сохранена! Теперь оповещения будут приходить с ней.", message_thread_id=mthread(message))
+    db.alert_set_image(target, fid)
+    bot.send_message(chat.id, "🖼 Картинка сохранена! Теперь оповещения будут приходить с ней.")
 
 
 @bot.my_chat_member_handler()
@@ -646,6 +724,24 @@ def send_alert(row, plain, html, is_buy, thread_override="default"):
         db.alert_remove(row["chat_id"])
 
 
+def send_preview(chat_id, thread_id, row, text):
+    """Показать превью там, где идёт настройка (НЕ в целевой чат)"""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🟣 Купить PZM", url=BUY_URL))
+    markup.add(types.InlineKeyboardButton("📢 Канал PRIZM", url=CHANNEL_URL))
+    img = row.get("image_file_id")
+    if img:
+        bot.send_photo(chat_id, img, caption=text, parse_mode="HTML",
+                       reply_markup=markup, message_thread_id=thread_id)
+    elif os.path.exists(DEFAULT_IMAGE):
+        with open(DEFAULT_IMAGE, "rb") as f:
+            bot.send_photo(chat_id, f, caption=text, parse_mode="HTML",
+                           reply_markup=markup, message_thread_id=thread_id)
+    else:
+        bot.send_message(chat_id, text, parse_mode="HTML",
+                         reply_markup=markup, message_thread_id=thread_id)
+        
+
 def broadcast(plain, html, pzm_amount, is_buy):
     counts = get_holders_counts()
     for row in db.alert_get_enabled():
@@ -701,12 +797,22 @@ def monitor_trades():
 def start_alert_bot():
     """Точка входа: монитор + поллинг бота (для WSGI)"""
     try:
-        bot.set_my_commands([
-            types.BotCommand("add", "добавить бота в группу"),
+        private_cmds = [
+            types.BotCommand("start", "о боте и как подключить"),
             types.BotCommand("rate", "текущий курс PZM"),
             types.BotCommand("alert", "настройки оповещений"),
+            types.BotCommand("add", "добавить бота в группу"),
+            types.BotCommand("chats", "мои чаты и каналы: настройки"),
             types.BotCommand("testalert", "тестовое сообщение с картинкой"),
-        ])
+        ]
+        group_cmds = [
+            types.BotCommand("rate", "текущий курс PZM"),
+            types.BotCommand("add", "добавить бота в группу"),
+            types.BotCommand("alert", "настройки оповещений"),
+            types.BotCommand("testalert", "тестовое сообщение с картинкой"),
+        ]
+        bot.set_my_commands(private_cmds, scope=types.BotCommandScopeAllPrivateChats())
+        bot.set_my_commands(group_cmds, scope=types.BotCommandScopeAllGroupChats())
     except Exception as e:
         print(f"⚠️ Не удалось задать меню команд: {e}")    
     db.init_alert_chats()

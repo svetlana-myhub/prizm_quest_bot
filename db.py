@@ -873,3 +873,10 @@ def alert_set_filter(chat_id, value):
 def alert_set_holders_mode(chat_id, mode):
     with sqlite3.connect(DB_PATH) as con:
         con.execute("UPDATE alert_chats SET holders_mode=? WHERE chat_id=?", (mode, chat_id))        
+
+
+def alert_get_all():
+    with sqlite3.connect(DB_PATH) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute("SELECT * FROM alert_chats").fetchall()
+    return [dict(r) for r in rows]
