@@ -25,6 +25,10 @@ log = logging.info                              # ← НОВОЕ
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
+import socket
+from config import ADMIN_TG_IDS
+
+
 # === КОНФИГУРАЦИЯ ===
 PZM_POOL = "EQAa6k6QZCq87DyyrnIZQOZsP8xF7B3gOMKXvHD7r-pevSub"
 BUY_URL = "https://dedust.io/ru/swap/GRAM/EQDROsytSxLtDp_2pRIEainUGqZPRBbXkwayVn7VAT7bHHWL"
@@ -49,6 +53,8 @@ thread_prompt = {}
 pending_thread = {}
 pending_image_target = {}
 holders_cache = {"counts": None, "ts": 0}
+monitor_beat = {"ts": 0.0}
+
 
 # ========== ДАННЫЕ ==========
 
@@ -742,6 +748,22 @@ def send_preview(chat_id, thread_id, row, text):
                          reply_markup=markup, message_thread_id=thread_id)
         
 
+def notify_admin(text):
+    for uid in ADMIN_TG_IDS:
+        try:
+            bot.send_message(uid, text)
+        except Exception as e:
+            print(f"⚠️ Не удалось уведомить админа {uid}: {e}")
+
+
+def safe_monitor():
+    try:
+        monitor_trades()
+    except Exception as e:
+        notify_admin(f"🔴 Монитор сделок упал: {e}")
+        raise
+
+
 def broadcast(plain, html, pzm_amount, is_buy):
     counts = get_holders_counts()
     for row in db.alert_get_enabled():
@@ -769,6 +791,7 @@ def monitor_trades():
 
     fails = 0
     while True:
+        monitor_beat["ts"] = time.time()
         try:
             r = requests.get(f"{TONAPI}/accounts/{PZM_POOL}/events?limit=20", timeout=10).json()
             events = r.get("events", [])
@@ -796,41 +819,29 @@ def monitor_trades():
 
 def start_alert_bot():
     """Точка входа: монитор + поллинг бота (для WSGI)"""
-    try:
-        private_cmds = [
-            types.BotCommand("start", "о боте и как подключить"),
-            types.BotCommand("rate", "текущий курс PZM"),
-            types.BotCommand("alert", "настройки оповещений"),
-            types.BotCommand("add", "добавить бота в группу"),
-            types.BotCommand("chats", "мои чаты и каналы: настройки"),
-            types.BotCommand("testalert", "тестовое сообщение с картинкой"),
-        ]
-        group_cmds = [
-            types.BotCommand("rate", "текущий курс PZM"),
-            types.BotCommand("add", "добавить бота в группу"),
-            types.BotCommand("alert", "настройки оповещений"),
-            types.BotCommand("testalert", "тестовое сообщение с картинкой"),
-        ]
-        bot.set_my_commands(private_cmds, scope=types.BotCommandScopeAllPrivateChats())
-        bot.set_my_commands(group_cmds, scope=types.BotCommandScopeAllGroupChats())
-    except Exception as e:
-        print(f"⚠️ Не удалось задать меню команд: {e}")    
     db.init_alert_chats()
-    threading.Thread(target=monitor_trades, daemon=True).start()
+    threading.Thread(target=safe_monitor, daemon=True, name="alert_monitor").start()
+    notify_admin(f"🟢 Алерт-бот запущен (машина: {socket.gethostname()})")
+    fails = 0
     while True:
         started = time.time()
         try:
             bot.infinity_polling(timeout=10, long_polling_timeout=10,
                                  allowed_updates=["message", "callback_query", "my_chat_member"])
         except Exception as e:
-            log(f"⚠️ Поллинг упал: {e}. Перезапуск через 10 сек...")
+            fails += 1
+            if fails in (5, 20, 50):
+                notify_admin(f"🔴 Алерт-бот: {fails} попыток переподключения подряд. Ошибка: {e}")
+            print(f"⚠️ Поллинг упал: {e}. Перезапуск через 10 сек...")
             time.sleep(10)
             continue
-        # Поллинг вернулся сам без исключения
+        if fails >= 5:
+            notify_admin("🟢 Алерт-бот: поллинг восстановлен")
+        fails = 0
         if time.time() - started < 5:
-            log("🛑 Поллинг остановлен оператором. Завершаем работу.")
+            print("🛑 Поллинг остановлен оператором. Завершаем работу.")
             break
-        log("⚠️ Поллинг завершился сам. Перезапуск через 10 сек...")
+        print("⚠️ Поллинг завершился сам. Перезапуск через 10 сек...")
         time.sleep(10)
 
 
