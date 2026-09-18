@@ -757,11 +757,12 @@ def notify_admin(text):
 
 
 def safe_monitor():
-    try:
-        monitor_trades()
-    except Exception as e:
-        notify_admin(f"🔴 Монитор сделок упал: {e}")
-        raise
+    while True:
+        try:
+            monitor_trades()
+        except Exception as e:
+            notify_admin(f"🔴 Монитор сделок упал: {e}. Перезапуск через 15 сек...")
+            time.sleep(15)
 
 
 def broadcast(plain, html, pzm_amount, is_buy):
