@@ -799,6 +799,15 @@ def init_alert_chats():
         except sqlite3.OperationalError:
             pass
 
+        try:
+            con.execute("ALTER TABLE alert_chats ADD COLUMN autoclean INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            con.execute("ALTER TABLE alert_chats ADD COLUMN last_alert_msg_id INTEGER")
+        except sqlite3.OperationalError:
+            pass        
+
 
 def alert_set_thread(chat_id, thread_id, title=None):
     with sqlite3.connect(DB_PATH) as con:
@@ -880,3 +889,15 @@ def alert_get_all():
         con.row_factory = sqlite3.Row
         rows = con.execute("SELECT * FROM alert_chats").fetchall()
     return [dict(r) for r in rows]
+
+
+def alert_set_autoclean(chat_id, on):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET autoclean=? WHERE chat_id=?",
+                    (1 if on else 0, chat_id))
+
+
+def alert_set_last_msg(chat_id, msg_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("UPDATE alert_chats SET last_alert_msg_id=? WHERE chat_id=?",
+                    (msg_id, chat_id))

@@ -251,6 +251,9 @@ def settings_markup(row, target=None):
     mark.add(types.InlineKeyboardButton("🖼 Картинка: сбросить", callback_data=f"alert_img_reset{suf}"))
     mark.add(types.InlineKeyboardButton("👀 Предпросмотр", callback_data=f"alert_preview{suf}"))
     mark.add(types.InlineKeyboardButton("📣 Тест оповещения в чате", callback_data=f"alert_test{suf}"))
+    mark.add(types.InlineKeyboardButton(
+        "🧹 Автоочистка: вкл" if row.get("autoclean") else "🧹 Автоочистка: выкл",
+        callback_data=f"alert_clean{suf}"))
     mark.add(types.InlineKeyboardButton("🔕 Отключить оповещения", callback_data=f"alert_off{suf}"))
     return mark
 
@@ -383,7 +386,8 @@ def test_alert(message):
     sample = make_sample()
     counts = get_holders_counts()
     sample, _ = fill_holders(sample, sample, counts, row.get("holders_mode") or "50")
-    send_alert(row, sample, sample, is_buy=True, thread_override=mthread(message))
+    send_alert(row, sample, sample, is_buy=True,
+               thread_override=mthread(message), trade=True)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("alert_") or c.data.startswith("chat:"))
@@ -482,9 +486,11 @@ def alert_callbacks(call):
         sample = make_sample()
         counts = get_holders_counts()
         sample, _ = fill_holders(sample, sample, counts, row.get("holders_mode") or "50")
-        send_alert(row, sample, sample, True)
+        send_alert(row, sample, sample, True, trade=True)
         bot.answer_callback_query(call.id, "Отправлено!")
         return
+    elif action == "alert_clean":
+        db.alert_set_autoclean(cid, not row.get("autoclean"))
     elif action == "alert_off":
         db.alert_remove(cid)
         bot.answer_callback_query(call.id, "Оповещения отключены.")
@@ -694,7 +700,7 @@ def parse_trade(event):
 CHANNEL_URL = "https://t.me/prizm"
 
 
-def send_alert(row, plain, html, is_buy, thread_override="default"):
+def send_alert(row, plain, html, is_buy, thread_override="default", trade=False):
     img = row.get("image_file_id")
     thread_id = row.get("thread_id") if thread_override == "default" else thread_override
 
@@ -702,32 +708,47 @@ def send_alert(row, plain, html, is_buy, thread_override="default"):
     markup.add(types.InlineKeyboardButton("🟣 Купить PZM", url=BUY_URL))
     markup.add(types.InlineKeyboardButton("📢 Канал PRIZM", url=CHANNEL_URL))
 
+    # Автоочистка: удаляем предыдущее оповещение перед новым
+    if trade and row.get("autoclean"):
+        old = row.get("last_alert_msg_id")
+        if old:
+            try:
+                bot.delete_message(row["chat_id"], old)
+            except Exception:
+                pass
+
     def _send(thread):
         if img:
-            bot.send_photo(row["chat_id"], img, caption=html, parse_mode="HTML",
-                           reply_markup=markup, message_thread_id=thread)
+            return bot.send_photo(row["chat_id"], img, caption=html, parse_mode="HTML",
+                                  reply_markup=markup, message_thread_id=thread)
         elif os.path.exists(DEFAULT_IMAGE):
             with open(DEFAULT_IMAGE, "rb") as f:
-                bot.send_photo(row["chat_id"], f, caption=html, parse_mode="HTML",
-                               reply_markup=markup, message_thread_id=thread)
+                return bot.send_photo(row["chat_id"], f, caption=html, parse_mode="HTML",
+                                      reply_markup=markup, message_thread_id=thread)
         else:
-            bot.send_message(row["chat_id"], html, parse_mode="HTML",
-                             reply_markup=markup, message_thread_id=thread)
+            return bot.send_message(row["chat_id"], html, parse_mode="HTML",
+                                    reply_markup=markup, message_thread_id=thread)
 
+    msg = None
     try:
-        _send(thread_id)
+        msg = _send(thread_id)
     except Exception as e:
         if thread_id:
             # Тема удалена/недоступна — шлём в общую ленту и сбрасываем настройку
             log(f"⚠️ Тема {thread_id} недоступна в {row['chat_id']}: {e} — шлю в общую ленту")
             db.alert_reset_thread(row["chat_id"])
             try:
-                _send(None)
-                return
+                msg = _send(None)
             except Exception as e2:
                 e = e2
-        log(f"⚠️ Не удалось отправить в {row['chat_id']}: {e} — убираю чат")
-        db.alert_remove(row["chat_id"])
+                msg = None
+        if msg is None:
+            log(f"⚠️ Не удалось отправить в {row['chat_id']}: {e} — убираю чат")
+            db.alert_remove(row["chat_id"])
+            return
+
+    if trade:
+        db.alert_set_last_msg(row["chat_id"], msg.message_id)
 
 
 def send_preview(chat_id, thread_id, row, text):
@@ -776,7 +797,7 @@ def broadcast(plain, html, pzm_amount, is_buy):
         if f == "sells" and is_buy:
             continue
         p2, h2 = fill_holders(plain, html, counts, row.get("holders_mode") or "50")
-        send_alert(row, p2, h2, is_buy)
+        send_alert(row, p2, h2, is_buy, trade=True)
 
 
 def monitor_trades():
