@@ -42,7 +42,7 @@ def normalize(points):
 
 
 r = requests.get(f"{TONAPI}/rates/chart",
-                 params={"account": PZM_JETTON, "currency": "usd",
+                 params={"token": PZM_JETTON, "currency": "usd",
                          "from": from_ts, "to": to_ts}, timeout=20)
 print("HTTP", r.status_code)
 data = r.json()

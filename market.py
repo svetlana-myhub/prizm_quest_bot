@@ -2,6 +2,9 @@
 import time
 import requests
 import db
+import logging
+
+log = logging.info
 
 TONAPI = "https://tonapi.io/v2"
 DEDUST_API = "https://api.dedust.io/v2"
@@ -18,9 +21,12 @@ def get_rates():
     try:
         url = f"{TONAPI}/rates?tokens=ton,{PZM_JETTON}&currencies=usd"
         r = requests.get(url, timeout=10).json()
-        pzm = r["rates"][PZM_JETTON]["prices"]["USD"]
-        ton = r["rates"]["TON"]["prices"]["USD"]
-        diff = r["rates"][PZM_JETTON].get("diff_24h", {}).get("USD", "—")
+        rates = r.get("rates")
+        if not rates:
+            raise ValueError(f"tonapi ответил без rates: {str(r)[:150]}")
+        pzm = rates[PZM_JETTON]["prices"]["USD"]
+        ton = rates["TON"]["prices"]["USD"]
+        diff = rates[PZM_JETTON].get("diff_24h", {}).get("USD", "—")
         rates_cache = {"pzm_usd": pzm, "ton_usd": ton, "diff_24h": diff, "ts": time.time()}
         return pzm, ton, diff
     except Exception as e:
