@@ -901,3 +901,49 @@ def alert_set_last_msg(chat_id, msg_id):
     with sqlite3.connect(DB_PATH) as con:
         con.execute("UPDATE alert_chats SET last_alert_msg_id=? WHERE chat_id=?",
                     (msg_id, chat_id))
+
+
+# ==== ЖУРНАЛ СДЕЛОК И СНАПШОТЫ КУРСА ====
+def init_trades():
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER, is_buy INTEGER, pzm_amount REAL,
+                other_sym TEXT, other_amount REAL,
+                usd_value REAL, event_id TEXT UNIQUE)""")
+        con.execute("CREATE INDEX IF NOT EXISTS ix_trades_ts ON trades(ts)")
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS rate_snapshots (
+                ts INTEGER PRIMARY KEY, pzm_usd REAL, ton_usd REAL)""")
+
+
+def trade_log(ts, is_buy, pzm_amount, other_sym, other_amount, usd_value, event_id=""):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("INSERT OR IGNORE INTO trades(ts,is_buy,pzm_amount,other_sym,"
+                    "other_amount,usd_value,event_id) VALUES (?,?,?,?,?,?,?)",
+                    (ts, 1 if is_buy else 0, pzm_amount, other_sym,
+                     other_amount, usd_value, event_id))
+
+
+def trades_since(ts_from, side="all"):
+    q = "SELECT ts,is_buy,pzm_amount,usd_value FROM trades WHERE ts>=?"
+    if side == "buys":
+        q += " AND is_buy=1"
+    elif side == "sells":
+        q += " AND is_buy=0"
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(q, (ts_from,)).fetchall()
+
+
+def rate_snapshot_put(ts, pzm_usd, ton_usd):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("INSERT OR REPLACE INTO rate_snapshots(ts,pzm_usd,ton_usd) VALUES (?,?,?)",
+                    (ts, pzm_usd, ton_usd))
+
+
+def rate_snapshot_near(ts_target, tol=7200):
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT ts,pzm_usd FROM rate_snapshots WHERE ABS(ts-?)<=? "
+            "ORDER BY ABS(ts-?) LIMIT 1", (ts_target, tol, ts_target)).fetchone()

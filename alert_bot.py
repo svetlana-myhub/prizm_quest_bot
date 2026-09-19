@@ -28,13 +28,13 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 import socket
 from config import ADMIN_TG_IDS
 
+from market import (TONAPI, PZM_JETTON, PZM_POOL, get_rates,
+                    get_rub_rate, get_liquidity, rate_change_lines)
+
 
 # === КОНФИГУРАЦИЯ ===
-PZM_POOL = "EQAa6k6QZCq87DyyrnIZQOZsP8xF7B3gOMKXvHD7r-pevSub"
 BUY_URL = "https://dedust.io/ru/swap/GRAM/EQDROsytSxLtDp_2pRIEainUGqZPRBbXkwayVn7VAT7bHHWL"
-PZM_JETTON = "EQDROsytSxLtDp_2pRIEainUGqZPRBbXkwayVn7VAT7bHHWL"
 
-TONAPI = "https://tonapi.io/v2"
 TONCENTER = "https://toncenter.com/api/v2"
 
 DEFAULT_IMAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "alert_default.jpg")
@@ -46,7 +46,6 @@ if not ALERT_TOKEN:
 bot = telebot.TeleBot(ALERT_TOKEN)
 
 last_seen_ts = 0
-rates_cache = {"pzm_usd": 0.0013, "ton_usd": 1.36, "diff_24h": "—", "ts": 0}
 waiting_photo = {}
 domain_cache = {}  # {wallet_raw: (domain_or_None, timestamp)}
 thread_prompt = {}
@@ -58,21 +57,6 @@ monitor_beat = {"ts": 0.0}
 
 # ========== ДАННЫЕ ==========
 
-def get_rates():
-    global rates_cache
-    if time.time() - rates_cache["ts"] < 60:
-        return rates_cache["pzm_usd"], rates_cache["ton_usd"], rates_cache["diff_24h"]
-    try:
-        url = f"{TONAPI}/rates?tokens=ton,{PZM_JETTON}&currencies=usd"
-        r = requests.get(url, timeout=10).json()
-        pzm = r["rates"][PZM_JETTON]["prices"]["USD"]
-        ton = r["rates"]["TON"]["prices"]["USD"]
-        diff = r["rates"][PZM_JETTON].get("diff_24h", {}).get("USD", "—")
-        rates_cache = {"pzm_usd": pzm, "ton_usd": ton, "diff_24h": diff, "ts": time.time()}
-        return pzm, ton, diff
-    except Exception as e:
-        log(f"⚠️ Ошибка курсов: {e}")
-        return rates_cache["pzm_usd"], rates_cache["ton_usd"], rates_cache["diff_24h"]
 
 def get_holders_counts():
     """Количество холдеров по категориям (кэш 10 минут)"""
@@ -305,13 +289,28 @@ def add_cmd(message):
 
 @bot.message_handler(commands=["rate"])
 def rate_cmd(message):
-    pzm_usd, ton_usd, diff = get_rates()
-    ton_r, pzm_r = get_pool_reserves()
-    text = f"💵 Текущий курс PZM: ${pzm_usd:.6f}\n📊 Изменение за 24ч: {diff}"
-    if ton_r and pzm_r:
-        text += f"\n💱 В GRAM: {ton_r / pzm_r:.6f} GRAM за PZM"
-        text += f"\n📊 Ликвидность пула: {fmt_num(pzm_r)} PZM / {fmt_num(ton_r)} GRAM"
-    bot.send_message(message.chat.id, text, message_thread_id=mthread(message))
+    pzm_usd, ton_usd, diff24 = get_rates()
+    rub = get_rub_rate()
+    pzm_gram = pzm_usd / ton_usd if ton_usd else None
+    lines = ["📈 <b>Текущий курс PZM:</b>\n"]
+    lines.append(f"💲 $ {pzm_usd:.6f} USDT")
+    if pzm_gram:
+        lines.append(f"💎 {pzm_gram:.6f} GRAM")
+    if rub:
+        lines.append(f"💸 ₽ {pzm_usd * rub:.4f} RUB")
+    lines.append("\n📊 <b>Изменение курса в 💲:</b>")
+    lines.append(f"24 часа: {diff24}")
+    for label, pct in rate_change_lines(pzm_usd):
+        if pct is None:
+            lines.append(f"{label}: — (история копится)")
+        else:
+            lines.append(f"{label}: {pct:+.2f}%")
+    pzm_liq, gram_liq = get_liquidity()
+    if pzm_liq:
+        lines.append(f"\n💰 <b>Ликвидность пула:</b>\n"
+                     f"{fmt_num(pzm_liq)} PZM / {fmt_num(gram_liq)} GRAM")
+    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML",
+                     message_thread_id=mthread(message))
 
 
 @bot.message_handler(commands=["alert"])
@@ -390,6 +389,72 @@ def test_alert(message):
     sample, _ = fill_holders(sample, sample, counts, row.get("holders_mode") or "50")
     send_alert(row, sample, sample, is_buy=True,
                thread_override=mthread(message), trade=True)
+
+
+STAT_PERIODS = {"today": "сегодня", "7d": "7 дней", "30d": "30 дней"}
+STAT_SIDES = {"all": "все сделки", "buys": "только покупки", "sells": "только продажи"}
+
+
+def stats_markup(period, side):
+    mark = types.InlineKeyboardMarkup()
+    mark.row(*[types.InlineKeyboardButton(("✅ " if p == period else "") + lb,
+                                          callback_data=f"stats:{p}:{side}")
+               for p, lb in (("today", "Сегодня"), ("7d", "7 дней"), ("30d", "30 дней"))])
+    mark.row(*[types.InlineKeyboardButton(("✅ " if s == side else "") + lb,
+                                          callback_data=f"stats:{period}:{s}")
+               for s, lb in (("all", "Все"), ("buys", "🟢 Покупки"), ("sells", "🔴 Продажи"))])
+    return mark
+
+
+def show_stats(chat_id, period, side, thread=None, call=None):
+    now = int(time.time())
+    if period == "today":
+        dt = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        ts0 = int(dt.timestamp())
+    else:
+        ts0 = now - (7 if period == "7d" else 30) * 86400
+    rows = db.trades_since(ts0, side)
+    title = f"📊 <b>Статистика: {STAT_PERIODS[period]}</b> ({STAT_SIDES[side]})"
+    if not rows:
+        text = title + "\n\nПока нет сделок за период — журнал только начал копить историю."
+    else:
+        n = len(rows)
+        buys = sum(r[1] for r in rows)
+        sells = n - buys
+        vol_pzm = sum(r[2] for r in rows)
+        vol_usd = sum(r[3] for r in rows)
+        maxr = max(rows, key=lambda r: r[2])
+        parts = [f"Сделок: <b>{n}</b>"]
+        if side == "all":
+            g = round(buys / n * 10)
+            parts.append(f"🟢 {buys} / 🔴 {sells}")
+            parts.append("🟩" * g + "🟥" * (10 - g))
+        parts.append(f"Объём: <b>{fmt_num(vol_pzm)} PZM</b> (~${vol_usd:.2f})")
+        parts.append(f"Крупнейшая: {fmt_num(maxr[2])} PZM ({'🟢' if maxr[1] else '🔴'})")
+        parts.append(f"Средняя: {fmt_num(vol_pzm / n)} PZM")
+        text = title + "\n\n" + "\n".join(parts)
+    mark = stats_markup(period, side)
+    if call:
+        try:
+            bot.edit_message_text(text, chat_id, call.message.message_id,
+                                  parse_mode="HTML", reply_markup=mark)
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id)
+    else:
+        bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=mark,
+                         message_thread_id=thread)
+
+
+@bot.message_handler(commands=["stats"])
+def stats_cmd(message):
+    show_stats(message.chat.id, "7d", "all", thread=mthread(message))
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("stats:"))
+def stats_cb(call):
+    _, period, side = call.data.split(":")
+    show_stats(call.message.chat.id, period, side, call=call)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("alert_") or c.data.startswith("chat:"))
@@ -694,9 +759,13 @@ def parse_trade(event):
         plain.append(line)
         html.append(line)
         
-        return "\n".join(plain), "\n".join(html), pzm_amount, is_buy
+        meta = {"ts": event.get("timestamp", int(time.time())), "is_buy": is_buy,
+                "pzm": pzm_amount, "other_sym": other_sym,
+                "other_amount": other_amount, "usd": pzm_amount * pzm_usd,
+                "event_id": event.get("event_id", "")}
+        return "\n".join(plain), "\n".join(html), pzm_amount, is_buy, meta
     
-    return None, None, 0, False
+    return None, None, 0, False, {}
 
 
 CHANNEL_URL = "https://t.me/prizm"
@@ -821,8 +890,11 @@ def monitor_trades():
             events = r.get("events", [])
             new_events = [e for e in events if e["timestamp"] > last_seen_ts]
             for event in sorted(new_events, key=lambda e: e["timestamp"]):
-                plain, html, pzm_amount, is_buy = parse_trade(event)
+                plain, html, pzm_amount, is_buy, meta = parse_trade(event)
                 if plain:
+                    db.trade_log(meta["ts"], meta["is_buy"], meta["pzm"],
+                                 meta["other_sym"], meta["other_amount"], meta["usd"],
+                                 meta["event_id"])
                     log(plain)
                     broadcast(plain, html, pzm_amount, is_buy)
             if events:
@@ -841,12 +913,46 @@ def monitor_trades():
         time.sleep(30)
 
 
+def rate_snapshot_loop():
+    while True:
+        try:
+            pzm_usd, ton_usd, _ = get_rates()
+            if pzm_usd:
+                db.rate_snapshot_put(int(time.time()), pzm_usd, ton_usd)
+        except Exception as e:
+            print(f"⚠️ Снапшот курса: {e}")
+        time.sleep(3600)
+
+
 def start_alert_bot():
     """Точка входа: монитор + поллинг бота (для WSGI)"""
+    try:
+        private_cmds = [
+            types.BotCommand("start", "о боте и как подключить"),
+            types.BotCommand("rate", "текущий курс PZM"),
+            types.BotCommand("stats", "статистика сделок по периодам"),
+            types.BotCommand("alert", "настройки оповещений"),
+            types.BotCommand("add", "добавить бота в группу"),
+            types.BotCommand("chats", "мои чаты и каналы: настройки"),
+            types.BotCommand("testalert", "тестовое сообщение с картинкой"),
+        ]
+        group_cmds = [
+            types.BotCommand("rate", "текущий курс PZM"),
+            types.BotCommand("stats", "статистика сделок по периодам"),
+            types.BotCommand("alert", "настройки оповещений"),
+            types.BotCommand("add", "добавить бота в группу"),
+            types.BotCommand("testalert", "тестовое сообщение с картинкой"),
+        ]
+        bot.set_my_commands(private_cmds, scope=types.BotCommandScopeAllPrivateChats())
+        bot.set_my_commands(group_cmds, scope=types.BotCommandScopeAllGroupChats())
+    except Exception as e:
+        print(f"⚠️ Не удалось задать меню команд: {e}") 
     db.init_alert_chats()
     threading.Thread(target=safe_monitor, daemon=True, name="alert_monitor").start()
+    db.init_trades()
+    threading.Thread(target=rate_snapshot_loop, daemon=True, name="rate_snapshotter").start()
     notify_admin(f"🟢 Алерт-бот запущен (машина: {socket.gethostname()})")
-    fails = 0
+    fails = 0    
     while True:
         started = time.time()
         try:
