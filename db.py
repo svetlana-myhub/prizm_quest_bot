@@ -947,3 +947,9 @@ def rate_snapshot_near(ts_target, tol=7200):
         return con.execute(
             "SELECT ts,pzm_usd FROM rate_snapshots WHERE ABS(ts-?)<=? "
             "ORDER BY ABS(ts-?) LIMIT 1", (ts_target, tol, ts_target)).fetchone()
+
+
+def rate_snapshot_oldest():
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT ts,pzm_usd FROM rate_snapshots ORDER BY ts LIMIT 1").fetchone()    

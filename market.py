@@ -88,8 +88,17 @@ PERIODS = [("7 дней", 7 * 86400), ("1 месяц", 30 * 86400), ("1 год",
 def rate_change_lines(pzm_usd_now):
     """Изменения курса за периоды по снапшотам: [(метка, % или None)]"""
     out = []
+    now = int(time.time())
     for label, sec in PERIODS:
-        row = db.rate_snapshot_near(int(time.time()) - sec, tol=43200)
+        tol = max(43200, sec // 12)          # 7д: ±14ч, 1мес: ±2.5д, 1год: ±30д
+        row = db.rate_snapshot_near(now - sec, tol=tol)
+        if not row and sec >= 365 * 86400:
+            old = db.rate_snapshot_oldest()
+            if old and old[1] and (now - old[0]) >= 300 * 86400:
+                days = (now - old[0]) // 86400
+                out.append((f"с начала торгов ({days} дн)",
+                            (pzm_usd_now - old[1]) / old[1] * 100))
+                continue
         if row and row[1]:
             out.append((label, (pzm_usd_now - row[1]) / row[1] * 100))
         else:
