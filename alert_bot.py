@@ -391,7 +391,8 @@ def test_alert(message):
                thread_override=mthread(message), trade=True)
 
 
-STAT_PERIODS = {"today": "сегодня", "7d": "7 дней", "30d": "30 дней"}
+STAT_PERIODS = {"today": "сегодня", "7d": "7 дней", "30d": "30 дней",
+                "180d": "6 месяцев", "365d": "1 год", "all": "всё время"}
 STAT_SIDES = {"all": "все сделки", "buys": "только покупки", "sells": "только продажи"}
 
 
@@ -400,6 +401,9 @@ def stats_markup(period, side):
     mark.row(*[types.InlineKeyboardButton(("✅ " if p == period else "") + lb,
                                           callback_data=f"stats:{p}:{side}")
                for p, lb in (("today", "Сегодня"), ("7d", "7 дней"), ("30d", "30 дней"))])
+    mark.row(*[types.InlineKeyboardButton(("✅ " if p == period else "") + lb,
+                                          callback_data=f"stats:{p}:{side}")
+               for p, lb in (("180d", "6 мес"), ("365d", "1 год"), ("all", "Всё время"))])
     mark.row(*[types.InlineKeyboardButton(("✅ " if s == side else "") + lb,
                                           callback_data=f"stats:{period}:{s}")
                for s, lb in (("all", "Все"), ("buys", "🟢 Покупки"), ("sells", "🔴 Продажи"))])
@@ -411,8 +415,11 @@ def show_stats(chat_id, period, side, thread=None, call=None):
     if period == "today":
         dt = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         ts0 = int(dt.timestamp())
+    elif period == "all":
+        ts0 = 0
     else:
-        ts0 = now - (7 if period == "7d" else 30) * 86400
+        days = {"7d": 7, "30d": 30, "180d": 180, "365d": 365}[period]
+        ts0 = now - days * 86400
     rows = db.trades_since(ts0, side)
     title = f"📊 <b>Статистика: {STAT_PERIODS[period]}</b> ({STAT_SIDES[side]})"
     if not rows:
