@@ -140,7 +140,7 @@ def chart_markup(cur, period, amount=100):
     mark.row(*[types.InlineKeyboardButton(("✅ " if p == period else "") + lb,
                                           callback_data=f"chart:{cur}:{p}:{a}")
                for p, lb in p6[3:]])
-    mark.row(types.InlineKeyboardButton("🔢 Калькулятор PRIZM",
+    mark.row(types.InlineKeyboardButton("🔢 Калькулятор",
                                         callback_data=f"chartcalc:{cur}:{period}"),
              types.InlineKeyboardButton("🟣 Купить PRIZM", url=BUY_URL))
     return mark
@@ -266,10 +266,17 @@ def render(cur, period, amount=100):
     fig.savefig(buf, format="png", facecolor=BG)
     plt.close(fig)
     png = buf.getvalue()
-    caption = (f"📊 <b>PZM/{sym}</b> · {label}\n"
-               f"{fmt_val(last, cur)} {sym}  "
-               f"{'🟢' if pct >= 0 else '🔴'} {pct:+.2f}% за период\n"
-               f"⬇️ мин {fmt_val(vmin, cur)} · ⬆️ макс {fmt_val(vmax, cur)}")
+    cap_lines = [f"📊 <b>PZM/{sym}</b> · {label}",
+                 f"💲 Курс: {fmt_val(last, cur)} {sym}",
+                 f"{'🟢' if pct >= 0 else '🔴'} {pct:+.2f}% за период",
+                 f"⬆️ макс {fmt_val(vmax, cur)}",
+                 f"⬇️ мин {fmt_val(vmin, cur)}"]
+    if pzm_liq:
+        cap_lines.append(f"💰 Ликвидность: {fm(pzm_liq)} PZM / {fm(gram_liq)} GRAM")
+    caption = "\n".join(cap_lines)
+    if amount != 100:
+        caption = (f"🟣 <b>{fmt_amount(amount)} PZM = "
+                   f"{fmt_money(last * amount)} {sym}</b>\n\n" + caption)
     _cache[key] = (now, png, caption)
     return png, caption
 
