@@ -4,10 +4,22 @@ import os
 import threading
 import time
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/mplcache")
+
 from telebot import types
+
+_plt = None
+
+
+def _plt_mod():
+    """Ленивый импорт matplotlib: не тормозим старт веб-воркера."""
+    global _plt
+    if _plt is None:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        _plt = plt
+    return _plt
 
 import db
 from market import get_rates, get_rub_rate, get_liquidity, PZM_JETTON
@@ -99,11 +111,11 @@ def get_series(cur, sec):
     ts0 = now - sec if sec else 0
     if cur == "gram":
         rows = db.gram_series_since(ts0)
-        if len(rows) >= 2:
+        if len(rows) >= 50:                 # свапов достаточно — честный GRAM
             return rows
-        _, ton_usd, _ = get_rates()
+        _, ton_usd, _ = get_rates()         # иначе гладко из часовых снапшотов
         if not ton_usd:
-            return []
+            return rows if len(rows) >= 2 else []
         return [(ts, v / ton_usd) for ts, v in db.snapshots_since(ts0)]
     usd = db.snapshots_since(ts0)
     if cur == "rub":
@@ -146,6 +158,7 @@ def _prewarm():
 
 
 def render(cur, period, amount=100):
+    plt = _plt_mod()    
     key = (cur, period, amount)
     now = int(time.time())
     hit = _cache.get(key)
