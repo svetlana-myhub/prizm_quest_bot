@@ -110,13 +110,13 @@ def get_series(cur, sec):
     now = int(time.time())
     ts0 = now - sec if sec else 0
     if cur == "gram":
-        rows = db.gram_series_since(ts0)
-        if len(rows) >= 50:                 # свапов достаточно — честный GRAM
-            return rows
-        _, ton_usd, _ = get_rates()         # иначе гладко из часовых снапшотов
-        if not ton_usd:
-            return rows if len(rows) >= 2 else []
-        return [(ts, v / ton_usd) for ts, v in db.snapshots_since(ts0)]
+        _, ton_now, _ = get_rates()
+        if not ton_now:
+            return []
+        out = []
+        for ts, p, t in db.snapshots_full_since(ts0):
+            out.append((ts, p / (t if t and t > 0 else ton_now)))
+        return out
     usd = db.snapshots_since(ts0)
     if cur == "rub":
         rub = get_rub_rate()

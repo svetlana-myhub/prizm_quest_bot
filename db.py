@@ -962,6 +962,13 @@ def snapshots_since(ts0):
             (ts0,)).fetchall()
 
 
+def snapshots_full_since(ts0):
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT ts, pzm_usd, ton_usd FROM rate_snapshots WHERE ts>=? ORDER BY ts",
+            (ts0,)).fetchall()            
+
+
 def gram_series_since(ts0):
     """Исторический курс PZM в GRAM из самих сделок пула."""
     with sqlite3.connect(DB_PATH) as con:
