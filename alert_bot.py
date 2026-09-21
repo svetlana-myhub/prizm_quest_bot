@@ -912,8 +912,21 @@ def send_alert(row, plain, html, is_buy, thread_override="default", trade=False)
                 e = e2
                 msg = None
         if msg is None:
-            log(f"⚠️ Не удалось отправить в {row['chat_id']}: {e} — убираю чат")
-            db.alert_remove(row["chat_id"])
+            err = str(e).lower()
+            fatal = any(k in err for k in ("kicked", "not a member",
+                                           "chat not found", "bot was blocked",
+                                           "group chat was upgraded"))
+            if fatal:
+                log(f"🗑 Чат {row['chat_id']} недоступен навсегда ({e}) — убираю из базы")
+                db.alert_remove(row["chat_id"])
+                for aid in ADMIN_TG_IDS:
+                    try:
+                        bot.send_message(aid, f"🗑 Чат {row['chat_id']} "
+                                         f"({row.get('title')}) удалён из настроек: {e}")
+                    except Exception:
+                        pass
+            else:
+                log(f"⚠️ Временная ошибка отправки в {row['chat_id']}: {e} — чат оставляю, пропуск")
             return
 
     if trade:
