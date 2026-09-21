@@ -9,6 +9,7 @@ import telebot
 from telebot import types
 
 import db
+import chart
 
 import sys
 try:
@@ -265,6 +266,8 @@ def start_private(message):
         "к которым подключен бот как администратор\n\n"
         "Мои команды:\n"
         "/rate — текущий курс PZM\n"
+        "/chart — график курса картинкой: 3 валюты × 6 периодов\n"
+        "/calc — калькулятор PRIZM: пересчёт любой суммы в USDT, GRAM и RUB\n"        
         "/stats — статистика сделок по периодам\n"
         "/alert — настройки оповещений\n"
         "/add — добавить бота в группу\n"
@@ -309,8 +312,93 @@ def rate_cmd(message):
     if pzm_liq:
         lines.append(f"\n💰 <b>Ликвидность пула:</b>\n"
                      f"{fmt_num(pzm_liq)} PZM / {fmt_num(gram_liq)} GRAM")
+    mark = types.InlineKeyboardMarkup()
+    mark.add(types.InlineKeyboardButton("📊 График курса",
+                                        callback_data="chartopen:usd:7d"))
     bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML",
-                     message_thread_id=mthread(message))
+                     reply_markup=mark,
+                     message_thread_id=getattr(message, "message_thread_id", None))
+
+
+@bot.message_handler(commands=["chart"])
+def chart_cmd(message):
+    chart.show_chart(bot, message.chat.id, "usd", "7d",
+                     thread=getattr(message, "message_thread_id", None))
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("chartopen:"))
+def chart_open_cb(call):
+    _, cur, period = call.data.split(":")
+    chart.show_chart(bot, call.message.chat.id, cur, period, call=call,
+                     thread=getattr(call.message, "message_thread_id", None))
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("chart:"))
+def chart_cb(call):
+    parts = call.data.split(":")
+    if len(parts) == 4:                     # новые кнопки с суммой
+        _, cur, period, amt = parts
+        amount = float(amt)
+    else:                                   # старые кнопки без суммы
+        _, cur, period = parts
+        amount = 100
+    chart.show_chart(bot, call.message.chat.id, cur, period,
+                     edit_msg_id=call.message.message_id, call=call,
+                     thread=getattr(call.message, "message_thread_id", None),
+                     amount=amount)
+
+
+@bot.message_handler(commands=["calc"])
+def calc_cmd(message):
+    CALC_WAIT[message.from_user.id] = (
+        message.chat.id, "usd", "7d",
+        getattr(message, "message_thread_id", None))
+    bot.send_message(message.chat.id,
+                     "🔢 Введите количество PZM для расчёта (только число).\n"
+                     "Отмена — /cancel",
+                     message_thread_id=getattr(message, "message_thread_id", None))    
+
+
+CALC_WAIT = {}
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("chartcalc:"))
+def chart_calc_cb(call):
+    _, cur, period = call.data.split(":")
+    thread = getattr(call.message, "message_thread_id", None)
+    CALC_WAIT[call.from_user.id] = (call.message.chat.id, cur, period, thread)
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id,
+                     "🔢 Введите количество PZM для расчёта (только число)\n"
+                     "Отмена — /cancel",
+                     message_thread_id=thread)
+
+
+@bot.message_handler(commands=["cancel"])
+def cancel_cmd(message):
+    CALC_WAIT.pop(message.from_user.id, None)
+    bot.send_message(message.chat.id, "↩️ Отменено.",
+                     message_thread_id=getattr(message, "message_thread_id", None))
+
+
+@bot.message_handler(func=lambda m: m.content_type == "text"
+                     and m.from_user.id in CALC_WAIT)
+def calc_input(message):
+    st = CALC_WAIT.pop(message.from_user.id, None)
+    if not st:
+        return
+    chat_id, cur, period, thread = st
+    try:
+        amount = float(message.text.replace(",", ".").strip())
+        if amount <= 0:
+            raise ValueError
+    except Exception:
+        CALC_WAIT[message.from_user.id] = st
+        bot.send_message(message.chat.id,
+                         "⚠️ Нужно число, например 1000. Ещё раз или /cancel.",
+                         message_thread_id=thread)
+        return
+    chart.show_chart(bot, chat_id, cur, period, amount=amount, thread=thread)
 
 
 @bot.message_handler(commands=["alert"])
@@ -785,6 +873,9 @@ def send_alert(row, plain, html, is_buy, thread_override="default", trade=False)
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🟣 Купить PZM", url=BUY_URL))
     markup.add(types.InlineKeyboardButton("📢 Канал PRIZM", url=CHANNEL_URL))
+    markup.add(types.InlineKeyboardButton("📊 График курса",
+                                          callback_data="chartopen:usd:24h"))
+
 
     # Автоочистка: удаляем предыдущее оповещение перед новым
     if trade and row.get("autoclean"):
@@ -937,6 +1028,8 @@ def start_alert_bot():
         private_cmds = [
             types.BotCommand("start", "о боте и как подключить"),
             types.BotCommand("rate", "текущий курс PZM"),
+            types.BotCommand("chart", "график курса картинкой"),
+            types.BotCommand("calc", "калькулятор PRIZM"),            
             types.BotCommand("stats", "статистика сделок по периодам"),
             types.BotCommand("alert", "настройки оповещений"),
             types.BotCommand("add", "добавить бота в группу"),
@@ -945,6 +1038,8 @@ def start_alert_bot():
         ]
         group_cmds = [
             types.BotCommand("rate", "текущий курс PZM"),
+            types.BotCommand("chart", "график курса картинкой"),
+            types.BotCommand("calc", "калькулятор PRIZM"),            
             types.BotCommand("stats", "статистика сделок по периодам"),
             types.BotCommand("alert", "настройки оповещений"),
             types.BotCommand("add", "добавить бота в группу"),

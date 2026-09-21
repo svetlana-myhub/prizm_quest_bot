@@ -952,4 +952,21 @@ def rate_snapshot_near(ts_target, tol=7200):
 def rate_snapshot_oldest():
     with sqlite3.connect(DB_PATH) as con:
         return con.execute(
-            "SELECT ts,pzm_usd FROM rate_snapshots ORDER BY ts LIMIT 1").fetchone()    
+            "SELECT ts,pzm_usd FROM rate_snapshots ORDER BY ts LIMIT 1").fetchone()
+
+
+def snapshots_since(ts0):
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT ts, pzm_usd FROM rate_snapshots WHERE ts>=? ORDER BY ts",
+            (ts0,)).fetchall()
+
+
+def gram_series_since(ts0):
+    """Исторический курс PZM в GRAM из самих сделок пула."""
+    with sqlite3.connect(DB_PATH) as con:
+        return con.execute(
+            "SELECT ts, other_amount*1.0/pzm_amount FROM trades "
+            "WHERE other_sym='GRAM' AND pzm_amount>0 AND other_amount>0 AND ts>=? "
+            "ORDER BY ts", (ts0,)).fetchall()
+    
