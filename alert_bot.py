@@ -23,6 +23,13 @@ logging.basicConfig(level=logging.INFO,         # ← НОВОЕ
                     format="%(asctime)s %(message)s")
 log = logging.info                              # ← НОВОЕ
 
+def log_act(user, action, details=None, chat_id=None):
+    try:
+        db.log_activity(user.id, user.username, user.first_name, user.last_name,
+                        chat_id, action, details)
+    except Exception:
+        pass
+
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
@@ -253,6 +260,7 @@ def settings_text(row):
 
 @bot.message_handler(commands=["start"], func=lambda m: m.chat.type == "private")
 def start_private(message):
+    log_act(message.from_user, "/start", chat_id=message.chat.id)          # start_cmd
     bot.send_message(message.chat.id, (
         "👋 Привет! Я публикую сделки с Prizm (PZM) на DeDust в чаты и каналы.\n\n"
         "Как подключить:\n"
@@ -322,12 +330,14 @@ def rate_cmd(message):
 
 @bot.message_handler(commands=["chart"])
 def chart_cmd(message):
+    log_act(message.from_user, "/chart", chat_id=message.chat.id)
     chart.show_chart(bot, message.chat.id, "usd", "7d",
                      thread=getattr(message, "message_thread_id", None))
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("chartopen:"))
 def chart_open_cb(call):
+    log_act(call.from_user, "кнопка", call.data, call.message.chat.id) 
     _, cur, period = call.data.split(":")
     chart.show_chart(bot, call.message.chat.id, cur, period, call=call,
                      thread=getattr(call.message, "message_thread_id", None))
@@ -335,6 +345,7 @@ def chart_open_cb(call):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("chart:"))
 def chart_cb(call):
+    log_act(call.from_user, "кнопка", call.data, call.message.chat.id) 
     parts = call.data.split(":")
     if len(parts) == 4:                     # новые кнопки с суммой
         _, cur, period, amt = parts
@@ -350,6 +361,7 @@ def chart_cb(call):
 
 @bot.message_handler(commands=["calc"])
 def calc_cmd(message):
+    log_act(message.from_user, "/calc", chat_id=message.chat.id)
     CALC_WAIT[message.from_user.id] = (
         message.chat.id, "usd", "7d",
         getattr(message, "message_thread_id", None))
@@ -364,6 +376,7 @@ CALC_WAIT = {}
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("chartcalc:"))
 def chart_calc_cb(call):
+    log_act(call.from_user, "кнопка", call.data, call.message.chat.id) 
     _, cur, period = call.data.split(":")
     thread = getattr(call.message, "message_thread_id", None)
     CALC_WAIT[call.from_user.id] = (call.message.chat.id, cur, period, thread)
@@ -384,6 +397,7 @@ def cancel_cmd(message):
 @bot.message_handler(func=lambda m: m.content_type == "text"
                      and m.from_user.id in CALC_WAIT)
 def calc_input(message):
+    log_act(message.from_user, "ввод калькулятора", message.text, message.chat.id)
     st = CALC_WAIT.pop(message.from_user.id, None)
     if not st:
         return
@@ -403,6 +417,7 @@ def calc_input(message):
 
 @bot.message_handler(commands=["alert"])
 def alert_cmd(message):
+    log_act(message.from_user, "/alert", chat_id=message.chat.id)
     chat = message.chat
     if chat.type in ("group", "supergroup", "channel"):
         if not is_admin(chat.id, message.from_user.id):
@@ -438,6 +453,7 @@ def chats_cmd_group(message):
 
 @bot.message_handler(commands=["chats"], func=lambda m: m.chat.type == "private")
 def chats_cmd(message):
+    log_act(message.from_user, "/chats")
     items = []
     for r in db.alert_get_all():
         if r["chat_type"] == "private":
@@ -464,6 +480,7 @@ def chats_cmd(message):
 
 @bot.message_handler(commands=["testalert"])
 def test_alert(message):
+    log_act(message.from_user, "/testalert", chat_id=message.chat.id)
     chat = message.chat
     if chat.type in ("group", "supergroup", "channel"):
         if not is_admin(chat.id, message.from_user.id):
@@ -546,14 +563,43 @@ def stats_cmd(message):
     show_stats(message.chat.id, "7d", "all", thread=mthread(message))
 
 
+@bot.message_handler(commands=["activity"],
+                     func=lambda m: m.from_user.id in ADMIN_TG_IDS)
+def activity_cmd(message):
+    parts = message.text.split()
+    uid, uname = None, None
+    if len(parts) > 1:
+        u = parts[1].lstrip("@")
+        uid = int(u) if u.isdigit() else None
+        uname = u if not u.isdigit() else None
+    rows = db.activity_recent(30, uid, uname)
+    if not rows:
+        bot.send_message(message.chat.id, "📭 Записей пока нет",
+                         message_thread_id=mthread(message))
+        return
+    lines = ["🕵️ <b>Журнал взаимодействий с ботом:</b>"]
+    for ts, u_id, u_name, fname, cid, action, details in rows:
+        who = f"@{u_name}" if u_name else f"{fname} (id {u_id})"
+        line = f"{ts[:16]} | {who} | {action}"
+        if details:
+            line += f" | {details}"
+        if cid:
+            line += f" | чат {cid}"
+        lines.append(line)
+    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML",
+                     message_thread_id=mthread(message))    
+
+
 @bot.callback_query_handler(func=lambda c: c.data.startswith("stats:"))
 def stats_cb(call):
+    log_act(call.from_user, "кнопка", call.data, call.message.chat.id) 
     _, period, side = call.data.split(":")
     show_stats(call.message.chat.id, period, side, call=call)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("alert_") or c.data.startswith("chat:"))
 def alert_callbacks(call):
+    log_act(call.from_user, "кнопка", call.data, call.message.chat.id)
     data = call.data
 
     # Выбор чата из личного списка
@@ -654,6 +700,7 @@ def alert_callbacks(call):
     elif action == "alert_clean":
         db.alert_set_autoclean(cid, not row.get("autoclean"))
     elif action == "alert_off":
+        log(f"🔕 Чат {cid} отключён кнопкой админа — строка настроек удалена")
         db.alert_remove(cid)
         bot.answer_callback_query(call.id, "Оповещения отключены.")
         try:
@@ -674,6 +721,7 @@ def alert_callbacks(call):
 
 @bot.callback_query_handler(func=lambda c: c.data == "thread_cancel")
 def thread_cancel(call):
+    log_act(call.from_user, "кнопка", call.data, call.message.chat.id) 
     chat = call.message.chat
     waiting_photo.pop(chat.id, None)
     msg_id = thread_prompt.pop(chat.id, None)
@@ -756,7 +804,10 @@ def save_photo(message):
 def my_chat_member(update):
     chat = update.chat
     status = update.new_chat_member.status
-    print(f"📥 my_chat_member: chat={chat.id} type={chat.type} status={status}")
+    log_act(update.from_user,
+            "бот добавлен" if status in ("member", "administrator") else "бот исключён/вышел",
+            chat_id=chat.id)
+    print(f"📬 my_chat_member: chat={chat.id} type={chat.type} status={status}")
     if status in ("member", "administrator"):
         if chat.type == "private":
             db.alert_upsert(chat.id, chat.title or "Личный чат", chat.type, trades_on=0)
@@ -772,6 +823,7 @@ def my_chat_member(update):
             except Exception as e:
                 print(f"⚠️ Не удалось поприветствовать: {e}")
     elif status in ("left", "kicked"):
+        log(f"🚪 Бот вышел/исключён из {chat.id} — убираю чат из настроек")
         db.alert_remove(chat.id)
 
 
@@ -1048,6 +1100,7 @@ def start_alert_bot():
             types.BotCommand("add", "добавить бота в группу"),
             types.BotCommand("chats", "мои чаты и каналы: настройки"),
             types.BotCommand("testalert", "тестовое сообщение с картинкой"),
+            types.BotCommand("activity", "журнал: кто и что делал с ботом"), 
         ]
         group_cmds = [
             types.BotCommand("rate", "текущий курс PZM"),
@@ -1056,7 +1109,7 @@ def start_alert_bot():
             types.BotCommand("stats", "статистика сделок по периодам"),
             types.BotCommand("alert", "настройки оповещений"),
             types.BotCommand("add", "добавить бота в группу"),
-            types.BotCommand("testalert", "тестовое сообщение с картинкой"),
+            types.BotCommand("testalert", "тестовое сообщение с картинкой"),           
         ]
         bot.set_my_commands(private_cmds, scope=types.BotCommandScopeAllPrivateChats())
         bot.set_my_commands(group_cmds, scope=types.BotCommandScopeAllGroupChats())

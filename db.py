@@ -774,6 +774,12 @@ def init_alert_chats():
                 added_at TEXT
             )""")
 
+        con.execute("""CREATE TABLE IF NOT EXISTS user_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT DEFAULT (datetime('now')),
+            user_id INTEGER, username TEXT, first_name TEXT, last_name TEXT,
+            chat_id INTEGER, action TEXT, details TEXT)""")
+
         try:
             con.execute("ALTER TABLE alert_chats ADD COLUMN image_file_id TEXT")
         except sqlite3.OperationalError:
@@ -838,6 +844,26 @@ def alert_upsert(chat_id, title, chat_type, trades_on=1):
 def alert_remove(chat_id):
     with sqlite3.connect(DB_PATH) as con:
         con.execute("DELETE FROM alert_chats WHERE chat_id=?", (chat_id,))
+
+
+def log_activity(user_id, username, first_name, last_name, chat_id, action, details=None):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("""INSERT INTO user_activity
+            (user_id, username, first_name, last_name, chat_id, action, details)
+            VALUES (?,?,?,?,?,?,?)""",
+            (user_id, username, first_name, last_name, chat_id, action, details))
+
+
+def activity_recent(limit=30, uid=None, uname=None):
+    with sqlite3.connect(DB_PATH) as con:
+        if uid is not None or uname is not None:
+            return con.execute(
+                "SELECT ts, user_id, username, first_name, chat_id, action, details "
+                "FROM user_activity WHERE user_id=? OR username LIKE ? "
+                "ORDER BY id DESC LIMIT ?", (uid or -1, f"%{uname or ''}%", limit)).fetchall()
+        return con.execute(
+            "SELECT ts, user_id, username, first_name, chat_id, action, details "
+            "FROM user_activity ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
 
 def alert_get(chat_id):
