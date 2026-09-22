@@ -266,11 +266,16 @@ def render(cur, period, amount=100):
     fig.savefig(buf, format="png", facecolor=BG)
     plt.close(fig)
     png = buf.getvalue()
+    cur_em = {"USDT": "💲", "GRAM": "💎", "RUB": "💸"}.get(sym, "💲")
     cap_lines = [f"📊 <b>PZM/{sym}</b> · {label}",
-                 f"💲 Курс: {fmt_val(last, cur)} {sym}",
+                 f"{cur_em} Курс: {fmt_val(last, cur)} {sym}",
                  f"{'🟢' if pct >= 0 else '🔴'} {pct:+.2f}% за период",
                  f"⬆️ макс {fmt_val(vmax, cur)}",
                  f"⬇️ мин {fmt_val(vmin, cur)}"]
+    try:
+        pzm_liq, gram_liq = get_liquidity()
+    except Exception:
+        pzm_liq = gram_liq = 0
     if pzm_liq:
         cap_lines.append(f"💰 Ликвидность: {fm(pzm_liq)} PZM / {fm(gram_liq)} GRAM")
     caption = "\n".join(cap_lines)
