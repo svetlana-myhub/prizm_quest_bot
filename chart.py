@@ -90,6 +90,8 @@ def fmt_amount(a):
     88888888 -> '88 888 888', 8800 -> '8.8K', 8880 -> '8.88K', 1500000 -> '1.5M'"""
     if a == int(a):
         n = int(a)
+        if n == 1000:
+            return "1000"
         if n >= 1000 and n % 100 == 0:
             if n >= 1e6:
                 return trim(f"{n / 1e6:.2f}") + "M"

@@ -36,7 +36,7 @@ CALC_ERROR = {}   # user_id -> (chat_id, thread_id, message_id ошибки)
 
 
 def market_published(trigger, sent):
-    """В группах: старый рыночный ответ удаляется, новый занимает слот, триггер удаляется."""
+    """🧹 В группах: старый рыночный ответ удаляется, новый занимает слот, триггер удаляется."""
     if sent is None:
         return
     if trigger.chat.type not in ("group", "supergroup"):
@@ -357,16 +357,18 @@ def rate_cmd(message):
 @bot.message_handler(commands=["chart"])
 def chart_cmd(message):
     log_act(message.from_user, "/chart", chat_id=message.chat.id)
-    chart.show_chart(bot, message.chat.id, "usd", "7d",
-                     thread=getattr(message, "message_thread_id", None))
+    msg = chart.show_chart(bot, message.chat.id, "usd", "7d", amount=1000,
+                           thread=getattr(message, "message_thread_id", None))
+    market_published(message, msg)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("chartopen:"))
 def chart_open_cb(call):
     log_act(call.from_user, "кнопка", call.data, call.message.chat.id) 
     _, cur, period = call.data.split(":")
-    chart.show_chart(bot, call.message.chat.id, cur, period, call=call,
-                     thread=getattr(call.message, "message_thread_id", None))
+    msg = chart.show_chart(bot, call.message.chat.id, cur, period, amount=1000, call=call,
+                           thread=getattr(call.message, "message_thread_id", None))
+    market_published(call.message, msg)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("chart:"))
@@ -378,7 +380,7 @@ def chart_cb(call):
         amount = float(amt)
     else:                                   # старые кнопки без суммы
         _, cur, period = parts
-        amount = 100
+        amount = 1000
     chart.show_chart(bot, call.message.chat.id, cur, period,
                      edit_msg_id=call.message.message_id, call=call,
                      thread=getattr(call.message, "message_thread_id", None),
@@ -435,6 +437,11 @@ def cancel_cmd(message):
     CALC_ERROR.pop(message.from_user.id, None)    
     bot.send_message(message.chat.id, "↩️ Отменено.",
                      message_thread_id=getattr(message, "message_thread_id", None))
+    if message.chat.type in ("group", "supergroup"):
+        try:
+            bot.delete_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
 
 
 @bot.message_handler(func=lambda m: m.content_type == "text"
@@ -455,6 +462,12 @@ def calc_input(message):
                                "⚠️ Нужно число, например 1000. Ещё раз или /cancel.",
                                message_thread_id=thread)
         CALC_ERROR[message.from_user.id] = (message.chat.id, thread, err.message_id)
+        # Удаляем ошибочный ввод
+        if message.chat.type in ("group", "supergroup"):
+            try:
+                bot.delete_message(message.chat.id, message.message_id)
+            except Exception:
+                pass
         return
     msg = chart.show_chart(bot, chat_id, cur, period, amount=amount, thread=thread)
     market_published(message, msg)
