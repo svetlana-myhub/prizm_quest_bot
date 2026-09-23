@@ -32,7 +32,36 @@ def log_act(user, action, details=None, chat_id=None):
 
 
 CALC_PROMPT = {}   # user_id -> (chat_id, thread_id, message_id подсказки)
-CALC_ERROR = {}   # user_id -> (chat_id, thread_id, message_id ошибки)
+CALC_ERROR = {}    # user_id -> (chat_id, thread_id, message_id ошибки)
+CALC_TIMER = {}    # user_id -> threading.Timer
+
+def _schedule_auto_cancel(user_id, chat_id, thread_id):
+    """Отменяет старый таймер и ставит новый на 60 секунд."""
+    old_timer = CALC_TIMER.pop(user_id, None)
+    if old_timer:
+        old_timer.cancel()
+    
+    def auto_cancel():
+        CALC_TIMER.pop(user_id, None)
+        CALC_WAIT.pop(user_id, None)
+        prompt = CALC_PROMPT.pop(user_id, None)
+        err = CALC_ERROR.pop(user_id, None)
+        if prompt:
+            try:
+                bot.delete_message(prompt[0], prompt[2])
+                time.sleep(1)  # ← Пауза 1 секунду между удалениями
+            except Exception:
+                pass
+        if err:
+            try:
+                bot.delete_message(err[0], err[2])
+            except Exception:
+                pass
+    
+    timer = threading.Timer(60.0, auto_cancel)
+    timer.daemon = True
+    timer.start()
+    CALC_TIMER[user_id] = timer
 
 
 def market_published(trigger, sent):
@@ -405,6 +434,9 @@ def calc_cmd(message):
             bot.delete_message(message.chat.id, message.message_id)
         except Exception:
             pass
+    
+    _schedule_auto_cancel(message.from_user.id, message.chat.id,
+                          getattr(message, "message_thread_id", None) or 0)
 
 
 CALC_WAIT = {}
@@ -424,24 +456,57 @@ def chart_calc_cb(call):
     CALC_PROMPT[call.from_user.id] = (call.message.chat.id,
                                       thread,
                                       msg.message_id)
-    if call.message.chat.type in ("group", "supergroup"):
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except Exception:
-            pass
+    _schedule_auto_cancel(call.from_user.id, call.message.chat.id, thread)
 
 
 @bot.message_handler(commands=["cancel"])
 def cancel_cmd(message):
+    # Отменяем таймер
+    timer = CALC_TIMER.pop(message.from_user.id, None)
+    if timer:
+        timer.cancel()
+    
     CALC_WAIT.pop(message.from_user.id, None)
-    CALC_ERROR.pop(message.from_user.id, None)    
-    bot.send_message(message.chat.id, "↩️ Отменено.",
-                     message_thread_id=getattr(message, "message_thread_id", None))
+    
+    # Собираем все сообщения для удаления
+    to_delete = []
+    
+    # Подсказка
+    prompt = CALC_PROMPT.pop(message.from_user.id, None)
+    if prompt:
+        to_delete.append((prompt[0], prompt[2]))
+    
+    # Ошибка
+    err = CALC_ERROR.pop(message.from_user.id, None)
+    if err:
+        to_delete.append((err[0], err[2]))
+    
+    # Отправляем "Отменено"
+    chat_id = message.chat.id
+    thread = getattr(message, "message_thread_id", None)
+    cancel_msg = bot.send_message(chat_id, "↩️ Отменено.",
+                                  message_thread_id=thread)
+    
+    # Удаляем команду /cancel
     if message.chat.type in ("group", "supergroup"):
         try:
-            bot.delete_message(message.chat.id, message.message_id)
+            bot.delete_message(chat_id, message.message_id)
         except Exception:
             pass
+    
+    # Через 5 секунд удаляем подсказку, ошибку и "Отменено"
+    def delayed_delete():
+        for cid, mid in to_delete:
+            try:
+                bot.delete_message(cid, mid)
+            except Exception:
+                pass
+        try:
+            bot.delete_message(chat_id, cancel_msg.message_id)
+        except Exception:
+            pass
+    
+    threading.Timer(5.0, delayed_delete).start()
 
 
 @bot.message_handler(func=lambda m: m.content_type == "text"
@@ -462,15 +527,22 @@ def calc_input(message):
                                "⚠️ Нужно число, например 1000. Ещё раз или /cancel.",
                                message_thread_id=thread)
         CALC_ERROR[message.from_user.id] = (message.chat.id, thread, err.message_id)
-        # Удаляем ошибочный ввод
         if message.chat.type in ("group", "supergroup"):
             try:
                 bot.delete_message(message.chat.id, message.message_id)
             except Exception:
                 pass
+        # Пересоздаём таймер для ошибки
+        _schedule_auto_cancel(message.from_user.id, message.chat.id, thread)
         return
     msg = chart.show_chart(bot, chat_id, cur, period, amount=amount, thread=thread)
     market_published(message, msg)
+     
+    # Отменяем таймер
+    timer = CALC_TIMER.pop(message.from_user.id, None)
+    if timer:
+        timer.cancel()
+    
     prompt = CALC_PROMPT.pop(message.from_user.id, None)
     if prompt:
         try:
