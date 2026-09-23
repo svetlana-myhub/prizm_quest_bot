@@ -299,9 +299,9 @@ def show_chart(bot, chat_id, cur, period, edit_msg_id=None, call=None,
             except Exception:
                 pass
             return
-        bot.send_message(chat_id, "📉 Мало данных для графика за этот период — "
-                                  "попробуйте другой.", message_thread_id=thread)
-        return
+        msg = bot.send_message(chat_id, "📉 Мало данных для графика за этот период — "
+                                    "попробуйте другой.", message_thread_id=thread)
+        return msg
     if call:
         try:
             bot.answer_callback_query(call.id)
@@ -326,5 +326,6 @@ def show_chart(bot, chat_id, cur, period, edit_msg_id=None, call=None,
                 bot.delete_message(chat_id, edit_msg_id)
             except Exception:
                 pass
-    bot.send_photo(chat_id, png, caption=caption, parse_mode="HTML",
-                   reply_markup=mark, message_thread_id=thread)
+    msg = bot.send_photo(chat_id, png, caption=caption, parse_mode="HTML",
+                         reply_markup=mark, message_thread_id=thread)
+    return msg
