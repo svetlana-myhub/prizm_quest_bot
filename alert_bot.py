@@ -30,6 +30,31 @@ def log_act(user, action, details=None, chat_id=None):
     except Exception:
         pass
 
+
+CALC_PROMPT = {}   # user_id -> (chat_id, thread_id, message_id подсказки)
+CALC_ERROR = {}   # user_id -> (chat_id, thread_id, message_id ошибки)
+
+
+def market_published(trigger, sent):
+    """В группах: старый рыночный ответ удаляется, новый занимает слот, триггер удаляется."""
+    if sent is None:
+        return
+    if trigger.chat.type not in ("group", "supergroup"):
+        return
+    th = getattr(trigger, "message_thread_id", None) or 0
+    old = db.market_last_get(trigger.chat.id, th)
+    if old and old != sent.message_id:
+        try:
+            bot.delete_message(trigger.chat.id, old)
+        except Exception:
+            pass
+    db.market_last_set(trigger.chat.id, th, sent.message_id)
+    try:
+        bot.delete_message(trigger.chat.id, trigger.message_id)
+    except Exception:
+        pass
+
+
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
@@ -323,9 +348,10 @@ def rate_cmd(message):
     mark = types.InlineKeyboardMarkup()
     mark.add(types.InlineKeyboardButton("📊 График курса",
                                         callback_data="chartopen:usd:7d"))
-    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML",
-                     reply_markup=mark,
-                     message_thread_id=getattr(message, "message_thread_id", None))
+    msg = bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML",
+                           reply_markup=mark,
+                           message_thread_id=getattr(message, "message_thread_id", None))
+    market_published(message, msg)
 
 
 @bot.message_handler(commands=["chart"])
@@ -365,10 +391,18 @@ def calc_cmd(message):
     CALC_WAIT[message.from_user.id] = (
         message.chat.id, "usd", "7d",
         getattr(message, "message_thread_id", None))
-    bot.send_message(message.chat.id,
-                     "🔢 Введите количество PZM для расчёта (только число).\n"
-                     "Отмена — /cancel",
-                     message_thread_id=getattr(message, "message_thread_id", None))    
+    prompt = bot.send_message(message.chat.id,
+                              "🔢 Введите количество PZM для расчёта (только число).\n"
+                              "Отмена — /cancel",
+                              message_thread_id=getattr(message, "message_thread_id", None))
+    CALC_PROMPT[message.from_user.id] = (message.chat.id,
+                                         getattr(message, "message_thread_id", None) or 0,
+                                         prompt.message_id)
+    if message.chat.type in ("group", "supergroup"):
+        try:
+            bot.delete_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
 
 
 CALC_WAIT = {}
@@ -381,15 +415,24 @@ def chart_calc_cb(call):
     thread = getattr(call.message, "message_thread_id", None)
     CALC_WAIT[call.from_user.id] = (call.message.chat.id, cur, period, thread)
     bot.answer_callback_query(call.id)
-    bot.send_message(call.message.chat.id,
-                     "🔢 Введите количество PZM для расчёта (только число)\n"
-                     "Отмена — /cancel",
-                     message_thread_id=thread)
+    msg = bot.send_message(call.message.chat.id,
+                           "🔢 Введите количество PZM для расчёта (только число)\n"
+                           "Отмена — /cancel",
+                           message_thread_id=thread)
+    CALC_PROMPT[call.from_user.id] = (call.message.chat.id,
+                                      thread,
+                                      msg.message_id)
+    if call.message.chat.type in ("group", "supergroup"):
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
 
 
 @bot.message_handler(commands=["cancel"])
 def cancel_cmd(message):
     CALC_WAIT.pop(message.from_user.id, None)
+    CALC_ERROR.pop(message.from_user.id, None)    
     bot.send_message(message.chat.id, "↩️ Отменено.",
                      message_thread_id=getattr(message, "message_thread_id", None))
 
@@ -408,11 +451,25 @@ def calc_input(message):
             raise ValueError
     except Exception:
         CALC_WAIT[message.from_user.id] = st
-        bot.send_message(message.chat.id,
-                         "⚠️ Нужно число, например 1000. Ещё раз или /cancel.",
-                         message_thread_id=thread)
+        err = bot.send_message(message.chat.id,
+                               "⚠️ Нужно число, например 1000. Ещё раз или /cancel.",
+                               message_thread_id=thread)
+        CALC_ERROR[message.from_user.id] = (message.chat.id, thread, err.message_id)
         return
-    chart.show_chart(bot, chat_id, cur, period, amount=amount, thread=thread)
+    msg = chart.show_chart(bot, chat_id, cur, period, amount=amount, thread=thread)
+    market_published(message, msg)
+    prompt = CALC_PROMPT.pop(message.from_user.id, None)
+    if prompt:
+        try:
+            bot.delete_message(prompt[0], prompt[2])
+        except Exception:
+            pass
+    err = CALC_ERROR.pop(message.from_user.id, None)
+    if err:
+        try:
+            bot.delete_message(err[0], err[2])
+        except Exception:
+            pass
 
 
 @bot.message_handler(commands=["alert"])

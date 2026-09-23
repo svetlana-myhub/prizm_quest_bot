@@ -772,7 +772,7 @@ def init_alert_chats():
                 trades_on INTEGER DEFAULT 1,
                 min_volume_pzm REAL DEFAULT 0,
                 added_at TEXT
-            )""")
+            )""")      
 
         con.execute("""CREATE TABLE IF NOT EXISTS user_activity (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -814,6 +814,26 @@ def init_alert_chats():
         except sqlite3.OperationalError:
             pass        
 
+        con.execute("""CREATE TABLE IF NOT EXISTS market_last (
+            chat_id INTEGER, thread_id INTEGER DEFAULT 0, msg_id INTEGER,
+            PRIMARY KEY (chat_id, thread_id))""")  
+
+
+def market_last_get(chat_id, thread_id=0):
+    with sqlite3.connect(DB_PATH) as con:
+        r = con.execute("SELECT msg_id FROM market_last WHERE chat_id=? AND thread_id=?",
+                        (chat_id, thread_id)).fetchone()
+        return r[0] if r else None
+
+
+def market_last_set(chat_id, thread_id, msg_id):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("""INSERT INTO market_last (chat_id, thread_id, msg_id)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(chat_id, thread_id)
+                       DO UPDATE SET msg_id=excluded.msg_id""",
+                    (chat_id, thread_id, msg_id))
+        
 
 def alert_set_thread(chat_id, thread_id, title=None):
     with sqlite3.connect(DB_PATH) as con:
