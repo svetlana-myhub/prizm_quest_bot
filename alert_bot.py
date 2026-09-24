@@ -400,7 +400,8 @@ def chart_open_cb(call):
                            thread=getattr(call.message, "message_thread_id", None))
     # Не удаляем триггер, если это оповещение о сделке
     text = getattr(call.message, "text", "") or ""
-    is_alert = "сделк" in text.lower() or "🔔" in text
+    # Оповещение о сделке содержит "Txn:" или "Покупка PZM"/"Продажа PZM"
+    is_alert = "Txn:" in text or "Покупка PZM" in text or "Продажа PZM" in text
     market_published(call.message, msg, delete_trigger=not is_alert)
 
 
