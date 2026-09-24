@@ -64,7 +64,7 @@ def _schedule_auto_cancel(user_id, chat_id, thread_id):
     CALC_TIMER[user_id] = timer
 
 
-def market_published(trigger, sent):
+def market_published(trigger, sent, delete_trigger=True):
     """🧹 В группах: старый рыночный ответ удаляется, новый занимает слот, триггер удаляется."""
     if sent is None:
         return
@@ -78,10 +78,11 @@ def market_published(trigger, sent):
         except Exception:
             pass
     db.market_last_set(trigger.chat.id, th, sent.message_id)
-    try:
-        bot.delete_message(trigger.chat.id, trigger.message_id)
-    except Exception:
-        pass
+    if delete_trigger:
+        try:
+            bot.delete_message(trigger.chat.id, trigger.message_id)
+        except Exception:
+            pass
 
 
 from dotenv import load_dotenv
@@ -397,7 +398,10 @@ def chart_open_cb(call):
     _, cur, period = call.data.split(":")
     msg = chart.show_chart(bot, call.message.chat.id, cur, period, amount=1000, call=call,
                            thread=getattr(call.message, "message_thread_id", None))
-    market_published(call.message, msg)
+    # Не удаляем триггер, если это оповещение о сделке
+    text = getattr(call.message, "text", "") or ""
+    is_alert = "сделк" in text.lower() or "🔔" in text
+    market_published(call.message, msg, delete_trigger=not is_alert)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("chart:"))
