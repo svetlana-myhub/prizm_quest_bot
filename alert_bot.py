@@ -399,8 +399,8 @@ def chart_open_cb(call):
     msg = chart.show_chart(bot, call.message.chat.id, cur, period, amount=1000, call=call,
                            thread=getattr(call.message, "message_thread_id", None))
     # Не удаляем триггер, если это оповещение о сделке
-    text = getattr(call.message, "text", "") or ""
-    # Оповещение о сделке содержит "Txn:" или "Покупка PZM"/"Продажа PZM"
+    # Оповещение может быть фото с caption или текстовым сообщением
+    text = (getattr(call.message, "caption", "") or "") + (getattr(call.message, "text", "") or "")
     is_alert = "Txn:" in text or "Покупка PZM" in text or "Продажа PZM" in text
     market_published(call.message, msg, delete_trigger=not is_alert)
 
