@@ -63,23 +63,47 @@ def get_rub_rate():
 
 
 def get_liquidity():
-    """Резервы пула DeDust: (PZM, GRAM)"""
-    if _liq_cache["pzm"] is not None and time.time() - _liq_cache["ts"] < 300:
-        return _liq_cache["pzm"], _liq_cache["gram"]
+    """Живые резервы пула DeDust напрямую из смарт-контракта: (PZM, TON)"""
+    cached_pzm = _liq_cache.get("pzm")
+    cached_ton = _liq_cache.get("ton", _liq_cache.get("gram"))
+    
+    # Кэш на 5 минут, чтобы не спамить TON Center API
+    if cached_pzm is not None and time.time() - _liq_cache["ts"] < 300:
+        return cached_pzm, cached_ton
+        
     try:
-        r = requests.get(f"{DEDUST_API}/pools/{PZM_POOL}", timeout=10).json()
-        lt, rt = r.get("leftToken") or {}, r.get("rightToken") or {}
-        lr, rr = int(r.get("leftReserve", 0)), int(r.get("rightReserve", 0))
-        if lt.get("symbol") == "PZM":
-            pzm_raw, gram_raw = lr, rr
-        else:
-            pzm_raw, gram_raw = rr, lr
-        pzm = pzm_raw / 10 ** get_pzm_decimals()
-        gram = gram_raw / 1e9
-        _liq_cache.update(ts=time.time(), pzm=pzm, gram=gram)
-        return pzm, gram
-    except Exception:
-        return _liq_cache["pzm"], _liq_cache["gram"]
+        url = "https://toncenter.com/api/v2/runGetMethod"
+        payload = {
+            "address": PZM_POOL,
+            "method": "get_reserves",
+            "stack": []
+        }
+        r = requests.post(url, json=payload, timeout=10)
+        
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("ok") and "result" in data:
+                stack = data["result"].get("stack", [])
+                if len(stack) >= 2:
+                    # stack[0] - reserve0 (TON), stack[1] - reserve1 (PZM)
+                    # Значения приходят в hex формате: ["num", "0x..."]
+                    reserve0_hex = stack[0][1]
+                    reserve1_hex = stack[1][1]
+                    
+                    # Конвертируем из hex в десятичные и применяем decimals
+                    ton_raw = int(reserve0_hex, 16)
+                    pzm_raw = int(reserve1_hex, 16)
+                    
+                    ton = ton_raw / 1e9
+                    pzm = pzm_raw / 100  # У PZM ровно 2 знака после запятой
+                    
+                    _liq_cache.update(ts=time.time(), pzm=pzm, ton=ton, gram=ton)
+                    return pzm, ton
+    except Exception as e:
+        print(f"⚠️ Ошибка получения ликвидности из блокчейна: {e}")
+        
+    # В случае ошибки возвращаем последние закэшированные значения
+    return _liq_cache.get("pzm"), _liq_cache.get("ton", _liq_cache.get("gram"))
 
 
 PERIODS = [("7 дней", 7 * 86400), ("1 месяц", 30 * 86400), ("1 год", 365 * 86400)]
