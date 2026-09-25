@@ -279,11 +279,12 @@ def render(cur, period, amount=100):
     except Exception:
         pzm_liq = gram_liq = 0
     if pzm_liq:
-        cap_lines.append(f"💰 Ликвидность: {fm(pzm_liq)} PZM / {fm(gram_liq)} GRAM")
+        cap_lines.append(f"💰 Ликвидность:\n{fm(pzm_liq)} PZM / {fm(gram_liq)} GRAM")
     caption = "\n".join(cap_lines)
     if amount != 100:
-        caption = (f"🟣 <b>{fmt_amount(amount)} PZM = "
-                    f"{fmt_money(last * amount)} {sym}</b>\n" + caption)
+        caption = (f" <b>{fmt_amount(amount)} PZM = "
+                   f"{fmt_money(last * amount)} {sym}</b>\n\n" + caption)
+
     _cache[key] = (now, png, caption)
     return png, caption
 
