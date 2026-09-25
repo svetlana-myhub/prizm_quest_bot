@@ -283,7 +283,7 @@ def render(cur, period, amount=100):
     caption = "\n".join(cap_lines)
     if amount != 100:
         caption = (f"🟣 <b>{fmt_amount(amount)} PZM = "
-                   f"{fmt_money(last * amount)} {sym}</b>\n\n" + caption)
+                    f"{fmt_money(last * amount)} {sym}</b>\n" + caption)
     _cache[key] = (now, png, caption)
     return png, caption
 
