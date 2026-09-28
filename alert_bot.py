@@ -673,10 +673,14 @@ def help_cmd(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         types.InlineKeyboardButton("📊 Графики", callback_data="help:charts"),
-        types.InlineKeyboardButton("💰 Ликвидность", callback_data="help:liquidity"),
+        types.InlineKeyboardButton("🔔 Оповещения", callback_data="help:alerts")
+    )
+    markup.add(
         types.InlineKeyboardButton("🔢 Калькулятор", callback_data="help:calc"),
-        types.InlineKeyboardButton("🔔 Оповещения", callback_data="help:alerts"),
-        types.InlineKeyboardButton("⌨️ Все команды", callback_data="help:commands"),
+        types.InlineKeyboardButton("⌨️ Все команды", callback_data="help:commands")
+    )
+    markup.add(
+        types.InlineKeyboardButton("💰 Ликвидность", callback_data="help:liquidity"),
         types.InlineKeyboardButton("❌ Закрыть", callback_data="help:close")
     )
     
