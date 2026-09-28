@@ -542,11 +542,11 @@ def help_main(call):
     
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton(" Графики", callback_data="help:charts"),
-        types.InlineKeyboardButton(" Ликвидность", callback_data="help:liquidity"),
-        types.InlineKeyboardButton(" Калькулятор", callback_data="help:calc"),
+        types.InlineKeyboardButton("📊 Графики", callback_data="help:charts"),
         types.InlineKeyboardButton("🔔 Оповещения", callback_data="help:alerts"),
+        types.InlineKeyboardButton("🔢 Калькулятор", callback_data="help:calc"),
         types.InlineKeyboardButton("⌨️ Все команды", callback_data="help:commands"),
+        types.InlineKeyboardButton("💰 Ликвидность", callback_data="help:liquidity"),
         types.InlineKeyboardButton("❌ Закрыть", callback_data="help:close")
     )
     
