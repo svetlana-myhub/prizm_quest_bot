@@ -34,6 +34,7 @@ def log_act(user, action, details=None, chat_id=None):
 CALC_PROMPT = {}   # user_id -> (chat_id, thread_id, message_id подсказки)
 CALC_ERROR = {}    # user_id -> (chat_id, thread_id, message_id ошибки)
 CALC_TIMER = {}    # user_id -> threading.Timer
+HELP_MESSAGE = {}  # chat_id -> message_id последнего сообщения /help
 
 def _schedule_auto_cancel(user_id, chat_id, thread_id):
     """Отменяет старый таймер и ставит новый на 60 секунд."""
@@ -457,10 +458,14 @@ def help_callback(call):
     
     # === ЗАКРЫТИЕ ===
     if action == "close":
+        chat_id = call.message.chat.id
         try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
+            bot.delete_message(chat_id, call.message.message_id)
         except Exception:
             pass
+        # Очищаем запись о сообщении помощи
+        if chat_id in HELP_MESSAGE:
+            del HELP_MESSAGE[chat_id]
         bot.answer_callback_query(call.id)
         return
     
@@ -651,6 +656,13 @@ def help_cmd(message):
     chat_id = message.chat.id
     thread = getattr(message, "message_thread_id", None)
     
+    # Удаляем предыдущее сообщение помощи, если оно есть
+    if chat_id in HELP_MESSAGE:
+        try:
+            bot.delete_message(chat_id, HELP_MESSAGE[chat_id])
+        except Exception:
+            pass
+    
     # Главное сообщение с кнопками
     text = (
         "🟣 <b>Prizm Bot Notification — оповещения о сделках, графики курса, расчеты PZM</b>\n\n"
@@ -670,6 +682,9 @@ def help_cmd(message):
     
     msg = bot.send_message(chat_id, text, parse_mode="HTML",
                           reply_markup=markup, message_thread_id=thread)
+    
+    # Сохраняем ID нового сообщения помощи
+    HELP_MESSAGE[chat_id] = msg.message_id
     
     # В группах удаляем команду /help
     if message.chat.type in ("group", "supergroup"):
