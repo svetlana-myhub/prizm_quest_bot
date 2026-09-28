@@ -317,17 +317,19 @@ def settings_text(row):
 def start_private(message):
     log_act(message.from_user, "/start", chat_id=message.chat.id)          # start_cmd
     bot.send_message(message.chat.id, (
-        "👋 Привет! Я публикую сделки с Prizm (PZM) на DeDust в чаты и каналы.\n\n"
+        "👋 Привет! Я публикую сделки с Prizm (PZM) на DeDust в чаты и каналы, "
+        "помогаю следить за курсом и могу пересчитать любую сумму PRIZM в USDT, GRAM и RUB.\n\n"
         "Как подключить:\n"
         "1️⃣ Добавьте меня в ваш чат или канал\n"
-        "   (с правом «Публиковать сообщения» и «Удалять сообщения»)\n\n"
+        "  (с правом «Публиковать, удалять и закреплять сообщения»)\n\n"
         "либо используйте команду /add — добавить бота в группу "
         "(нужные права выбираются автоматически)\n\n"
-        "2️⃣ Отправьте в чате /alert — я открою настройки\n"
-        "   (настраивают только администраторы чата)\n\n"
+        "2️⃣ Отправьте в чате /alert — я открою настройки"
+        "  (настраивают только администраторы чата)\n\n"
         "либо отправьте в боте /chats — я настрою ваши чаты и каналы, "
         "к которым подключен бот как администратор\n\n"
         "Мои команды:\n"
+        "/help — краткое описание функций\n"
         "/rate — текущий курс PZM\n"
         "/chart — график курса картинкой: 3 валюты × 6 периодов\n"
         "/calc — калькулятор PRIZM: пересчёт любой суммы в USDT, GRAM и RUB\n"        
@@ -335,7 +337,8 @@ def start_private(message):
         "/alert — настройки оповещений\n"
         "/add — добавить бота в группу\n"
         "/chats — мои чаты и каналы: настройки\n"
-        "/testalert — тестовое сообщение с картинкой"))
+        "/testalert — тестовое сообщение с картинкой\n\n"
+        "Разработано с 💜 для сообщества PRIZM"))
 
 
 @bot.message_handler(commands=["add"])
@@ -419,6 +422,132 @@ def chart_cb(call):
                      edit_msg_id=call.message.message_id, call=call,
                      thread=getattr(call.message, "message_thread_id", None),
                      amount=amount)
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("help:"))
+def help_callback(call):
+    """Обработчик кнопок руководства."""
+    action = call.data.split(":")[1]
+    
+    # === ГЛАВНОЕ МЕНЮ (кнопка "Назад") ===
+    if action == "main":
+        text = (
+           "🟣 <b>Prizm Bot Notification — оповещения о сделках, графики курса, расчеты PZM</b>\n\n"
+            "Я помогаю следить за курсом и сделками PZM на DeDust.\n"
+            "Краткое руководство, выберите раздел:"
+        )
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("📊 Графики", callback_data="help:charts"),
+            types.InlineKeyboardButton("🔔 Оповещения", callback_data="help:alerts")
+        )
+        markup.add(
+            types.InlineKeyboardButton("🔢 Калькулятор", callback_data="help:calc"),
+            types.InlineKeyboardButton("⌨️ Все команды", callback_data="help:commands")
+        )
+        markup.add(
+            types.InlineKeyboardButton("💰 Ликвидность", callback_data="help:liquidity"),
+            types.InlineKeyboardButton("❌ Закрыть", callback_data="help:close")
+        )
+
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+                             parse_mode="HTML", reply_markup=markup)
+        bot.answer_callback_query(call.id)
+        return
+    
+    # === ЗАКРЫТИЕ ===
+    if action == "close":
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        bot.answer_callback_query(call.id)
+        return
+    
+    # === РАЗДЕЛЫ ===
+    texts = {
+        "charts": (
+            "📊 <b>Графики курса</b>\n\n"
+            "• <b>/chart</b> — график PZM/USDT за 7 дней\n"
+            "• По умолчанию расчёт для <b>1000 PZM</b>\n"
+            "• Доступны 3 валюты х 6 периодов\n"
+            "• Кнопки валют: 💲 USDT, 💎 GRAM, 💸 RUB\n"
+            "• Кнопки периода: 24ч, 7 дней, 1 месяц, 6 мес, 1 год, всё время\n"
+            "• Показывает: курс, изменение %, максимум, минимум, ликвидность"
+        ),
+        "liquidity": (
+            " <b>Ликвидность пула</b>\n\n"
+            "• Данные берутся <b>напрямую из блокчейна</b> (TON Center API)\n"
+            "• Обновление в реальном времени\n"
+            "• Формат: <i>6.45M PZM / 6.7K GRAM</i>\n"
+            "• Показывается на каждом графике и в /rate"
+        ),
+        "calc": (
+            "🔢 <b>Калькулятор PRIZM</b>\n\n"
+            "• <b>/calc</b> — запустить калькулятор\n"
+            "• Введите число (например, 5000)\n"
+            "• Бот покажет стоимость в выбранной валюте\n"
+            "• <b>/cancel</b> — отменить ввод\n"
+            "• Авто-отмена через 60 сек молчания\n"
+            "• Также кнопка <b>🔢 Калькулятор</b> на графике"
+        ),
+        "alerts": (
+            " <b>Оповещения о сделках</b>\n\n"
+            "• Бот публикует покупки/продажи PZM на DeDust.io\n"
+            "• Содержит: сумму, адрес кошелька, хэш транзакции, курс, время\n\n"
+            "🧹 <b>Чистая лента:</b> можно включить автоочистку старых оповещений — в чате остаётся только последняя сделка. При этом оповещение <b>не удаляется</b> при просмотре графика и курса\n\n"
+            "⚙️ <b>Настройка:</b> через /alert в группе (только админам) или /chats в личке бота\n\n"
+            "🤖 <b>Как подключить:</b>\n"
+            "• Добавьте бота в чат/канал с правами «Публиковать/Удалять/Закреплять сообщения»\n"
+            "• Или команда /add — права настроятся автоматически"
+        ),
+        "commands": (
+            "⌨️ <b>Все команды</b>\n\n"
+            "/help — это руководство\n"
+            "/start — приветствие в боте и как подключить\n"
+            "/rate — текущий курс PRIZM\n"
+            "/chart — график курса картинкой: 3 валюты × 6 периодов\n"
+            "/calc — калькулятор PRIZM: пересчёт любой суммы в USDT, GRAM и RUB\n"
+            "/stats — статистика сделок по периодам\n"
+            "/add — добавить бота в группу\n"
+            "/alert — настройки оповещений (админам)\n"
+            "/testalert — тестовое сообщение с картинкой (админам)\n"
+            "/chats — мои чаты и каналы: настройки в личке бота (админам)"
+        )
+    }
+    
+    text = texts.get(action, "Раздел не найден")
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("◀️ Назад", callback_data="help:main"))
+    
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+                         parse_mode="HTML", reply_markup=markup)
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda c: c.data == "help:main")
+def help_main(call):
+    """Возврат к главному меню помощи."""
+    text = (
+        "🟣 <b>Prizm Bot Notification — оповещения о сделках, графики курса, расчеты PZM</b>\n\n"
+        "Я помогаю следить за курсом и сделками PZM на DeDust.\n"
+        "Краткое руководство, выберите раздел:"
+    )
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton(" Графики", callback_data="help:charts"),
+        types.InlineKeyboardButton(" Ликвидность", callback_data="help:liquidity"),
+        types.InlineKeyboardButton(" Калькулятор", callback_data="help:calc"),
+        types.InlineKeyboardButton("🔔 Оповещения", callback_data="help:alerts"),
+        types.InlineKeyboardButton("⌨️ Все команды", callback_data="help:commands"),
+        types.InlineKeyboardButton("❌ Закрыть", callback_data="help:close")
+    )
+    
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+                         parse_mode="HTML", reply_markup=markup)
+    bot.answer_callback_query(call.id)
 
 
 @bot.message_handler(commands=["calc"])
@@ -512,6 +641,42 @@ def cancel_cmd(message):
             pass
     
     threading.Timer(5.0, delayed_delete).start()
+
+
+@bot.message_handler(commands=["help"])
+def help_cmd(message):
+    """Краткое руководство по боту."""
+    log_act(message.from_user, "/help", chat_id=message.chat.id)
+    
+    chat_id = message.chat.id
+    thread = getattr(message, "message_thread_id", None)
+    
+    # Главное сообщение с кнопками
+    text = (
+        "🟣 <b>Prizm Bot Notification — оповещения о сделках, графики курса, расчеты PZM</b>\n\n"
+        "Я помогаю следить за курсом и сделками PZM на DeDust.\n"
+        "Краткое руководство, выберите раздел:"
+    )
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("📊 Графики", callback_data="help:charts"),
+        types.InlineKeyboardButton("💰 Ликвидность", callback_data="help:liquidity"),
+        types.InlineKeyboardButton("🔢 Калькулятор", callback_data="help:calc"),
+        types.InlineKeyboardButton("🔔 Оповещения", callback_data="help:alerts"),
+        types.InlineKeyboardButton("⌨️ Все команды", callback_data="help:commands"),
+        types.InlineKeyboardButton("❌ Закрыть", callback_data="help:close")
+    )
+    
+    msg = bot.send_message(chat_id, text, parse_mode="HTML",
+                          reply_markup=markup, message_thread_id=thread)
+    
+    # В группах удаляем команду /help
+    if message.chat.type in ("group", "supergroup"):
+        try:
+            bot.delete_message(chat_id, message.message_id)
+        except Exception:
+            pass
 
 
 @bot.message_handler(func=lambda m: m.content_type == "text"
@@ -1239,6 +1404,7 @@ def start_alert_bot():
     try:
         private_cmds = [
             types.BotCommand("start", "о боте и как подключить"),
+            types.BotCommand("help", "краткое руководство по боту"),
             types.BotCommand("rate", "текущий курс PZM"),
             types.BotCommand("chart", "график курса картинкой"),
             types.BotCommand("calc", "калькулятор PRIZM"),            
@@ -1250,6 +1416,7 @@ def start_alert_bot():
             types.BotCommand("activity", "журнал: кто и что делал с ботом"), 
         ]
         group_cmds = [
+            types.BotCommand("help", "краткое руководство по боту"),
             types.BotCommand("rate", "текущий курс PZM"),
             types.BotCommand("chart", "график курса картинкой"),
             types.BotCommand("calc", "калькулятор PRIZM"),            
