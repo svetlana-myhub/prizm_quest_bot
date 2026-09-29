@@ -874,7 +874,7 @@ def log_activity(user_id, username, first_name, last_name, chat_id, action, deta
             (user_id, username, first_name, last_name, chat_id, action, details))
 
 
-def activity_recent(limit=30, uid=None, uname=None):
+def activity_recent(limit=100, uid=None, uname=None):
     with sqlite3.connect(DB_PATH) as con:
         if uid is not None or uname is not None:
             return con.execute(

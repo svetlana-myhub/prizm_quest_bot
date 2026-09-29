@@ -903,7 +903,7 @@ def activity_cmd(message):
         u = parts[1].lstrip("@")
         uid = int(u) if u.isdigit() else None
         uname = u if not u.isdigit() else None
-    rows = db.activity_recent(30, uid, uname)
+    rows = db.activity_recent(100, uid, uname)
     if not rows:
         bot.send_message(message.chat.id, "📭 Записей пока нет",
                          message_thread_id=mthread(message))
