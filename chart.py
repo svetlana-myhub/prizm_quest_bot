@@ -173,19 +173,23 @@ def render(cur, period, amount=100):
     ts = [p[0] for p in series]
     vals = [p[1] for p in series]
     first = vals[0]
-    historical_last = vals[-1]  # оставляем для графика
+    historical_last = vals[-1]  # оставляем для отрисовки линии графика
     
-    # Получаем свежий курс из API для текста и расчетов
+    # Получаем свежий курс из API для текста и расчётов
     try:
-        usd_live, gram_live, rub_live = get_rates()
-        if cur == 0:
-            live_last = usd_live
-        elif cur == 1:
-            live_last = gram_live
+        pzm_usd, ton_usd, _ = get_rates()
+        if cur == 'usd':
+            live_last = float(pzm_usd)
+        elif cur == 'gram':
+            live_last = float(pzm_usd) / float(ton_usd) if ton_usd else historical_last
+        elif cur == 'rub':
+            rub_rate = get_rub_rate()
+            live_last = float(pzm_usd) * float(rub_rate) if rub_rate else historical_last
         else:
-            live_last = rub_live
-    except Exception:
-        live_last = historical_last  # запасной вариант, если API недоступен
+            live_last = historical_last
+    except Exception as e:
+        print(f"⚠️ Не удалось получить живой курс, используем исторический: {e}")
+        live_last = historical_last
         
     # Считаем процент изменения от начала периода до текущего живого курса
     pct = (live_last - first) / first * 100 if first else 0.0
