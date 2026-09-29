@@ -1415,7 +1415,7 @@ def rate_snapshot_loop():
                 db.rate_snapshot_put(int(time.time()), pzm_usd, ton_usd)
         except Exception as e:
             print(f"⚠️ Снапшот курса: {e}")
-        time.sleep(3600)
+        time.sleep(600)
 
 
 def start_alert_bot():

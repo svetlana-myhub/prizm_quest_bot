@@ -172,8 +172,23 @@ def render(cur, period, amount=100):
         return None, None
     ts = [p[0] for p in series]
     vals = [p[1] for p in series]
-    first, last = vals[0], vals[-1]
-    pct = (last - first) / first * 100 if first else 0.0
+    first = vals[0]
+    historical_last = vals[-1]  # оставляем для графика
+    
+    # Получаем свежий курс из API для текста и расчетов
+    try:
+        usd_live, gram_live, rub_live = get_rates()
+        if cur == 0:
+            live_last = usd_live
+        elif cur == 1:
+            live_last = gram_live
+        else:
+            live_last = rub_live
+    except Exception:
+        live_last = historical_last  # запасной вариант, если API недоступен
+        
+    # Считаем процент изменения от начала периода до текущего живого курса
+    pct = (live_last - first) / first * 100 if first else 0.0
     vmin, vmax = min(vals), max(vals)
     sym = CURS[cur][1]
     full = get_series(cur, None)          # вся доступная история валюты
@@ -237,7 +252,7 @@ def render(cur, period, amount=100):
         ico.imshow(plt.imread(COIN_PATH))
         ico.axis("off")
     hx = 0.18 if has_coin else 0.05
-    fig.text(hx, 0.865, f"PZM/{sym} {fmt_val(last, cur)}", color=LINE,
+    fig.text(hx, 0.865, f"PZM/{sym} {fmt_val(live_last, cur)}", color=LINE,
              fontsize=HEADER_FS, weight="bold", va="center")
     col = GREEN if pct >= 0 else RED
     fig.text(0.96, 0.865, f"{pct:+.2f}% за {label}", color=col, fontsize=12,
@@ -251,7 +266,7 @@ def render(cur, period, amount=100):
     fig.text(0.96, 0.21, d1, color=MUTED, fontsize=8, ha="right")
     pzm_liq, gram_liq = get_liquidity()
     amt_s = fmt_amount(amount)
-    fig.text(0.053, 0.117, f"{amt_s} PZM = {fmt_money(last * amount)} {sym}",
+    fig.text(0.053, 0.117, f"{amt_s} PZM = {fmt_money(live_last * amount)} {sym}",
              color=TEXT, fontsize=BOX_FS, weight="bold",
              bbox=dict(boxstyle="round,pad=0.35", fc="#2a1245", ec="#4b2a75", lw=0.8))
     if pzm_liq:
@@ -270,7 +285,7 @@ def render(cur, period, amount=100):
     png = buf.getvalue()
     cur_em = {"USDT": "💲", "GRAM": "💎", "RUB": "💸"}.get(sym, "💲")
     cap_lines = [f"📊 <b>PZM/{sym}</b> · {label}",
-                 f"{cur_em} Курс: {fmt_val(last, cur)} {sym}",
+                 f"{cur_em} Курс: {fmt_val(live_last, cur)} {sym}",
                  f"{'🟢' if pct >= 0 else '🔴'} {pct:+.2f}% за период",
                  f"⬆️ макс {fmt_val(vmax, cur)}",
                  f"⬇️ мин {fmt_val(vmin, cur)}"]
@@ -282,8 +297,8 @@ def render(cur, period, amount=100):
         cap_lines.append(f"💰 Ликвидность:\n{fm(pzm_liq)} PZM / {fm(gram_liq)} GRAM")
     caption = "\n".join(cap_lines)
     if amount != 100:
-        caption = (f" <b>{fmt_amount(amount)} PZM = "
-                   f"{fmt_money(last * amount)} {sym}</b>\n\n" + caption)
+         caption = (f" <b>{fmt_amount(amount)} PZM = "
+                   f"{fmt_money(live_last * amount)} {sym}</b>\n" + caption)
 
     _cache[key] = (now, png, caption)
     return png, caption
