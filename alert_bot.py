@@ -917,8 +917,15 @@ def activity_cmd(message):
         if cid:
             line += f" | чат {cid}"
         lines.append(line)
-    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML",
-                     message_thread_id=mthread(message))    
+    
+    # Разбиваем на части, если сообщение слишком длинное для Telegram (лимит ~4096)
+    full_text = "\n".join(lines)
+    chunk_size = 4000
+    chunks = [full_text[i:i+chunk_size] for i in range(0, len(full_text), chunk_size)]
+    
+    for chunk in chunks:
+        bot.send_message(message.chat.id, chunk, parse_mode="HTML",
+                         message_thread_id=mthread(message)) 
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("stats:"))
