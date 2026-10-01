@@ -4,6 +4,8 @@ import base64
 import requests
 import threading
 from datetime import datetime, timezone
+import sqlite3
+import re  
 
 import telebot
 from telebot import types
@@ -35,6 +37,7 @@ CALC_PROMPT = {}   # user_id -> (chat_id, thread_id, message_id подсказк
 CALC_ERROR = {}    # user_id -> (chat_id, thread_id, message_id ошибки)
 CALC_TIMER = {}    # user_id -> threading.Timer
 HELP_MESSAGE = {}  # chat_id -> message_id последнего сообщения /help
+target_chat = {}  # chat_id админа -> chat_id группы для настройки темы
 
 def _schedule_auto_cancel(user_id, chat_id, thread_id):
     """Отменяет старый таймер и ставит новый на 60 секунд."""
@@ -995,19 +998,43 @@ def alert_callbacks(call):
         if chat_info is None or not getattr(chat_info, "is_forum", False):
             bot.answer_callback_query(call.id, "В этом чате нет тем — оповещения идут в главную тему.")
             return
-        waiting_photo[cid] = "thread_pick"
-        mark = types.InlineKeyboardMarkup()
-        mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
-        sent = bot.send_message(
-            cid,
-            "✍️ Напишите любое сообщение в нужной теме, куда должны приходить "
-            "оповещения о сделках — я запомню её 📌\n"
-            "По умолчанию оповещения приходят в главную тему.",
-            reply_markup=mark,
-            message_thread_id=mthread(call.message))
-        thread_prompt[cid] = sent.message_id
+        # Проверяем, вызвана ли кнопка из лички (через /chats) или из группы (через /alert)
+        is_private = call.message.chat.type == "private"
+        
+        if is_private:
+            # Вызов из лички через /chats — запрашиваем ссылку
+            target_chat[cid] = int(tid)
+            waiting_photo[cid] = "thread_link"
+            mark = types.InlineKeyboardMarkup()
+            mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
+            sent = bot.send_message(
+                call.message.chat.id,
+                "📎 <b>Привязка темы</b>\n\n"
+                "Присылайте ссылку на <b>любое сообщение</b> из нужной темы.\n"
+                "Например: <code>https://t.me/c/2496931550/10558/30813</code>\n\n"
+                "<i>Я автоматически определю ID темы и сохраню его.</i>\n"
+                "По умолчанию оповещения приходят в главную тему.",
+                reply_markup=mark,
+                parse_mode="HTML"
+            )
+            thread_prompt[cid] = sent.message_id
+        else:
+            # Вызов из группы через /alert — как раньше (просим сообщение в теме)
+            waiting_photo[cid] = "thread_pick"
+            mark = types.InlineKeyboardMarkup()
+            mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
+            sent = bot.send_message(
+                cid,
+                " <b>Настройка темы</b>\n\n"
+                "Напишите <b>любое сообщение</b> в нужной теме, куда должны приходить оповещения о сделках — я запомню её 📌\n"
+                "По умолчанию оповещения приходят в главную тему.",
+                reply_markup=mark,
+                message_thread_id=mthread(call.message)
+            )
+            thread_prompt[cid] = sent.message_id
         bot.answer_callback_query(call.id)
         return
+
     elif action == "alert_img":
         waiting_photo[call.message.chat.id] = True
         pending_image_target[call.message.chat.id] = int(tid) if tid else None
@@ -1075,50 +1102,94 @@ def thread_cancel(call):
                      func=lambda m: waiting_photo.get(m.chat.id) == "thread_pick")
 def pick_thread(message):
     chat = message.chat
-    if chat.type in ("group", "supergroup") and not is_admin(chat.id, message.from_user.id):
+    if chat.type != "group" and chat.type != "supergroup":
         return
+    
     msg_id = thread_prompt.pop(chat.id, None)
     if msg_id:
         try:
             bot.delete_message(chat.id, msg_id)
         except Exception:
             pass
+    
     thread_id = mthread(message)
     if not thread_id:
         db.alert_reset_thread(chat.id)
         waiting_photo.pop(chat.id, None)
         bot.send_message(chat.id, "✅ Оповещения будут приходить в главную тему.")
         return
-    title = get_topic_name(chat.id, thread_id)
-    db.alert_set_thread(chat.id, thread_id, title)
-    if title:
-        waiting_photo.pop(chat.id, None)
-        bot.send_message(chat.id, f"✅ Оповещения будут приходить в тему «{title}».",
-                         message_thread_id=thread_id)
-    else:
-        pending_thread[chat.id] = thread_id
-        waiting_photo[chat.id] = "thread_name"
-        bot.send_message(chat.id,
-                         "Название темы не нашлось автоматически (создана давно).\n"
-                         "✍️ Пришлите одним сообщением название темы для меню:",
-                         message_thread_id=thread_id)
+    
+    # Просто сохраняем thread_id без запроса названия
+    db.alert_set_thread(chat.id, thread_id, None)
+    waiting_photo.pop(chat.id, None)
+    bot.send_message(chat.id, f"✅ Оповещения будут приходить в тему #{thread_id}.",
+                     message_thread_id=thread_id)
 
 
 @bot.message_handler(content_types=["text"],
-                     func=lambda m: waiting_photo.get(m.chat.id) == "thread_name")
-def save_thread_name(message):
-    chat = message.chat
-    if chat.type in ("group", "supergroup") and not is_admin(chat.id, message.from_user.id):
-        return
-    thread_id = pending_thread.pop(chat.id, None)
-    waiting_photo.pop(chat.id, None)
-    if thread_id is None:
-        return
-    title = message.text.strip()[:64]
-    db.alert_set_thread_title(chat.id, title)
-    bot.send_message(chat.id, f"✅ Сохранено: оповещения в тему «{title}».",
-                     message_thread_id=thread_id)
+                     func=lambda m: waiting_photo.get(m.chat.id) == "thread_link")
+def handle_thread_link(message):
+    """Обрабатывает ссылку на сообщение и извлекает thread_id"""
+    import re
     
+    chat_id = message.chat.id
+    link = message.text.strip()
+    
+    # Регулярка для извлечения chat_id и thread_id из ссылки
+    # Формат: https://t.me/c/2496931550/10558/30813
+    match = re.search(r"t\.me/c/(\d+)/(\d+)", link)
+    
+    if not match:
+        bot.send_message(chat_id, "❌ Не удалось распознать ссылку.\n\n"
+                         "Пришлите ссылку в формате:\n"
+                         "<code>https://t.me/c/2496931550/10558/30813</code>",
+                         parse_mode="HTML")
+        return
+    
+    chat_id_from_link = -100 * 10**9 + int(match.group(1))
+    thread_id = int(match.group(2))
+    
+    # Получаем целевой chat_id группы
+    target_cid = target_chat.get(chat_id)
+    
+    if not target_cid:
+        bot.send_message(chat_id, "❌ Ошибка: не найден целевой чат.\nНачните настройку заново через /chats")
+        return
+    
+    if chat_id_from_link != target_cid:
+        bot.send_message(chat_id, f"❌ Ссылка ведёт в другой чат!\n\n"
+                         f"Ожидалось: {target_cid}\n"
+                         f"Получено: {chat_id_from_link}")
+        return
+    
+    # Обновляем базу данных
+    try:
+        with sqlite3.connect("botdata/prizmquest.db") as con:
+            con.execute("""
+                UPDATE alert_chats 
+                SET thread_id = ?, thread_title = NULL
+                WHERE chat_id = ?
+            """, (thread_id, target_cid))
+        
+        # Удаляем подсказку
+        msg_id = thread_prompt.pop(chat_id, None)
+        if msg_id:
+            try:
+                bot.delete_message(chat_id, msg_id)
+            except:
+                pass
+        
+        bot.send_message(chat_id, f"✅ <b>Тема успешно привязана!</b>\n\n"
+                         f"Тема ID: <code>{thread_id}</code>",
+                         parse_mode="HTML")
+        
+        # Очищаем состояние
+        waiting_photo.pop(chat_id, None)
+        target_chat.pop(chat_id, None)
+        
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ошибка при сохранении: {e}")
+
 
 @bot.message_handler(content_types=["photo"])
 def save_photo(message):
