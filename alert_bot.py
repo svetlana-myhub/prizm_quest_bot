@@ -1368,14 +1368,35 @@ def send_alert(row, plain, html, is_buy, thread_override="default", trade=False)
         msg = _send(thread_id)
     except Exception as e:
         if thread_id:
-            # Тема удалена/недоступна — шлём в общую ленту и сбрасываем настройку
-            log(f"⚠️ Тема {thread_id} недоступна в {row['chat_id']}: {e} — шлю в общую ленту")
-            db.alert_reset_thread(row["chat_id"])
+            log(f"⚠️ Сбой отправки в тему {thread_id}: {e}. Запускаем протокол повторных попыток...")
+            msg = None
+            
+            # Попытка №1: пауза 5 секунд
+            time.sleep(5)
             try:
-                msg = _send(None)
+                msg = _send(thread_id)
+                log(f"✅ Успешная отправка в тему {thread_id} после 1-й попытки (пауза 5 сек)")
             except Exception as e2:
-                e = e2
-                msg = None
+                log(f"⚠️ 1-я попытка не удалась: {e2}. Ждем 30 сек для финальной попытки...")
+                
+                # Попытка №2: пауза 30 секунд
+                time.sleep(30)
+                try:
+                    msg = _send(thread_id)
+                    log(f"✅ Успешная отправка в тему {thread_id} после 2-й попытки (пауза 30 сек)")
+                except Exception as e3:
+                    log(f"❌ Не удалось отправить в тему {thread_id} после всех попыток: {e3}")
+                    
+                    # Фолбэк: отправка в общую ветку, НО настройка темы в БД НЕ СБРАСЫВАЕТСЯ!
+                    try:
+                        msg = _send(None)
+                        log(f"ℹ️ Оповещение отправлено в общую ветку чата {row['chat_id']} как резервный вариант")
+                    except Exception as e4:
+                        log(f"❌ Критическая ошибка: не удалось отправить даже в общую ветку: {e4}")
+        else:
+            # Если тема и так не была задана, просто логируем ошибку общей ветки
+            log(f"❌ Ошибка отправки в общую ветку: {e}")
+
         if msg is None:
             err = str(e).lower()
             fatal = any(k in err for k in ("kicked", "not a member",
