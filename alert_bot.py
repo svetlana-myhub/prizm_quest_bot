@@ -1137,26 +1137,55 @@ def handle_thread_link(message):
     
     admin_chat_id = message.chat.id
     link = message.text.strip()
-        
-    # Регулярка для извлечения chat_id и thread_id из ссылки
-    match = re.search(r"t\.me/c/(\d+)/(\d+)", link)
     
-    if not match:
-        bot.send_message(admin_chat_id, "❌ Не удалось распознать ссылку.\n\n"
-                         "Пришлите ссылку в формате:\n"
-                         "<code>https://t.me/c/2496931550/10558/30813</code>",
-                         parse_mode="HTML")
+    print(f"🔍 handle_thread_link вызван! admin_chat_id={admin_chat_id}, текст={link}")
+    
+    # Попытка 1: Приватный формат https://t.me/c/1862109356/416/2648
+    match_private = re.search(r"t\.me/c/(\d+)/(\d+)", link)
+    
+    # Попытка 2: Публичный формат https://t.me/wprizm/188/1306
+    match_public = re.search(r"t\.me/([a-zA-Z0-9_]+)/(\d+)/(\d+)", link)
+    
+    if not match_private and not match_public:
+        bot.send_message(admin_chat_id, 
+            "❌ Не удалось распознать ссылку.\n\n"
+            "Поддерживаемые форматы:\n"
+            "• Приватный: <code>https://t.me/c/1862109356/416/2648</code>\n"
+            "• Публичный: <code>https://t.me/wprizm/188/1306</code>",
+            parse_mode="HTML")
         return
     
-    # Правильное преобразование: добавляем -100 в начало числа из ссылки
-    chat_id_from_link = int(f"-100{match.group(1)}")
-    thread_id = int(match.group(2))
+    if match_private:
+        # Приватный формат: сразу получаем chat_id и thread_id
+        chat_id_from_link = int(f"-100{match_private.group(1)}")
+        thread_id = int(match_private.group(2))
+        print(f" Приватный формат: chat_id={chat_id_from_link}, thread_id={thread_id}")
         
-    # ПОЛУЧАЕМ target_cid ЗДЕСЬ, перед тем как его использовать или печатать!
+    elif match_public:
+        # Публичный формат: получаем chat_id через username
+        username = match_public.group(1)
+        thread_id = int(match_public.group(2))
+        print(f"🔍 Публичный формат: username=@{username}, thread_id={thread_id}")
+        
+        try:
+            chat_info = bot.get_chat(f"@{username}")
+            chat_id_from_link = chat_info.id
+            print(f"🔍 Получен chat_id={chat_id_from_link} для @{username}")
+        except Exception as e:
+            bot.send_message(admin_chat_id, 
+                f"❌ Не удалось получить информацию о чате @{username}.\n\n"
+                f"Убедитесь, что:\n"
+                f"• Бот добавлен в группу @{username}\n"
+                f"• Username написан правильно\n\n"
+                f"Ошибка: {e}")
+            return
+    
+    # Получаем целевой chat_id группы
     target_cid = target_chat.get(admin_chat_id)
-        
+    print(f"🔍 Ожидалось (из target_chat): target_cid={target_cid}")
+    
     if not target_cid:
-        bot.send_message(admin_chat_id, "❌ Ошибка: не найден целевой чат.\nНачните настройку заново через /chats")
+        bot.send_message(admin_chat_id, " Ошибка: не найден целевой чат.\nНачните настройку заново через /chats")
         waiting_photo.pop(admin_chat_id, None)
         return
     
