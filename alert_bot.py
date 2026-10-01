@@ -988,16 +988,15 @@ def alert_callbacks(call):
         cycle = {"1-49": "50", "50": "100", "100": "1-49"}
         db.alert_set_holders_mode(cid, cycle.get(row.get("holders_mode") or "50", "50"))
     elif action == "alert_thread":
-        if tid:
-            bot.answer_callback_query(call.id, "Настройка тем доступна через /alert внутри группы.")
-            return
         try:
             chat_info = bot.get_chat(cid)
         except Exception:
             chat_info = None
+        
         if chat_info is None or not getattr(chat_info, "is_forum", False):
-            bot.answer_callback_query(call.id, "В этом чате нет тем — оповещения идут в главную тему.")
+            bot.answer_callback_query(call.id, "⚠️ В этом чате нет тем — оповещения идут в общий чат")
             return
+        
         # Проверяем, вызвана ли кнопка из лички (через /chats) или из группы (через /alert)
         is_private = call.message.chat.type == "private"
         
@@ -1019,7 +1018,10 @@ def alert_callbacks(call):
             )
             thread_prompt[cid] = sent.message_id
         else:
-            # Вызов из группы через /alert — как раньше (просим сообщение в теме)
+            # Вызов из группы через /alert — просим написать сообщение в теме
+            if tid:
+                bot.answer_callback_query(call.id, "Настройка тем доступна через /alert внутри чата")
+                return
             waiting_photo[cid] = "thread_pick"
             mark = types.InlineKeyboardMarkup()
             mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
@@ -1029,7 +1031,8 @@ def alert_callbacks(call):
                 "Напишите <b>любое сообщение</b> в нужной теме, куда должны приходить оповещения о сделках — я запомню её 📌\n"
                 "По умолчанию оповещения приходят в главную тему.",
                 reply_markup=mark,
-                message_thread_id=mthread(call.message)
+                message_thread_id=mthread(call.message),
+                parse_mode="HTML"   # ← ДОБАВЛЕНО!
             )
             thread_prompt[cid] = sent.message_id
         bot.answer_callback_query(call.id)
