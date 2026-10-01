@@ -1002,11 +1002,9 @@ def alert_callbacks(call):
         
         if is_private:
             admin_chat_id = call.message.chat.id  # ID лички админа
-            print(f"🔍 alert_thread: is_private=True, admin_chat_id={admin_chat_id}, cid={cid}, tid={tid}")
             # Сохраняем, для какой группы настраиваем тему (ключ = ID лички)
             target_chat[admin_chat_id] = int(cid)
             waiting_photo[admin_chat_id] = "thread_link"
-            print(f"🔍 Установлено: target_chat[{admin_chat_id}]={target_chat[admin_chat_id]}, waiting_photo[{admin_chat_id}]={waiting_photo[admin_chat_id]}")
             mark = types.InlineKeyboardMarkup()
             mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
             sent = bot.send_message(
@@ -1139,9 +1137,7 @@ def handle_thread_link(message):
     
     admin_chat_id = message.chat.id
     link = message.text.strip()
-    
-    print(f"🔍 handle_thread_link вызван! admin_chat_id={admin_chat_id}, текст={link}")
-    
+        
     # Регулярка для извлечения chat_id и thread_id из ссылки
     match = re.search(r"t\.me/c/(\d+)/(\d+)", link)
     
@@ -1155,13 +1151,10 @@ def handle_thread_link(message):
     # Правильное преобразование: добавляем -100 в начало числа из ссылки
     chat_id_from_link = int(f"-100{match.group(1)}")
     thread_id = int(match.group(2))
-    
-    print(f"🔍 Из ссылки: chat_id={chat_id_from_link}, thread_id={thread_id}")
-    
+        
     # ПОЛУЧАЕМ target_cid ЗДЕСЬ, перед тем как его использовать или печатать!
     target_cid = target_chat.get(admin_chat_id)
-    print(f"🔍 Ожидалось (из target_chat): target_cid={target_cid}")
-    
+        
     if not target_cid:
         bot.send_message(admin_chat_id, "❌ Ошибка: не найден целевой чат.\nНачните настройку заново через /chats")
         waiting_photo.pop(admin_chat_id, None)
