@@ -1001,14 +1001,17 @@ def alert_callbacks(call):
         is_private = call.message.chat.type == "private"
         
         if is_private:
-            # Вызов из лички через /chats — запрашиваем ссылку
-            target_chat[cid] = int(tid)
-            waiting_photo[cid] = "thread_link"
+            admin_chat_id = call.message.chat.id  # ID лички админа
+            print(f"🔍 alert_thread: is_private=True, admin_chat_id={admin_chat_id}, cid={cid}, tid={tid}")
+            # Сохраняем, для какой группы настраиваем тему (ключ = ID лички)
+            target_chat[admin_chat_id] = int(cid)
+            waiting_photo[admin_chat_id] = "thread_link"
+            print(f"🔍 Установлено: target_chat[{admin_chat_id}]={target_chat[admin_chat_id]}, waiting_photo[{admin_chat_id}]={waiting_photo[admin_chat_id]}")
             mark = types.InlineKeyboardMarkup()
             mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
             sent = bot.send_message(
-                call.message.chat.id,
-                "📎 <b>Привязка темы</b>\n\n"
+                admin_chat_id,
+                " <b>Привязка темы</b>\n\n"
                 "Присылайте ссылку на <b>любое сообщение</b> из нужной темы.\n"
                 "Например: <code>https://t.me/c/2496931550/10558/30813</code>\n\n"
                 "<i>Я автоматически определю ID темы и сохраню его.</i>\n"
@@ -1016,25 +1019,24 @@ def alert_callbacks(call):
                 reply_markup=mark,
                 parse_mode="HTML"
             )
-            thread_prompt[cid] = sent.message_id
+            thread_prompt[admin_chat_id] = sent.message_id
+
         else:
             # Вызов из группы через /alert — просим написать сообщение в теме
-            if tid:
-                bot.answer_callback_query(call.id, "Настройка тем доступна через /alert внутри чата")
-                return
             waiting_photo[cid] = "thread_pick"
             mark = types.InlineKeyboardMarkup()
             mark.add(types.InlineKeyboardButton("❌ Отмена", callback_data="thread_cancel"))
             sent = bot.send_message(
                 cid,
-                " <b>Настройка темы</b>\n\n"
+                "📌 <b>Настройка темы</b>\n\n"
                 "Напишите <b>любое сообщение</b> в нужной теме, куда должны приходить оповещения о сделках — я запомню её 📌\n"
                 "По умолчанию оповещения приходят в главную тему.",
                 reply_markup=mark,
                 message_thread_id=mthread(call.message),
-                parse_mode="HTML"   # ← ДОБАВЛЕНО!
+                parse_mode="HTML"
             )
             thread_prompt[cid] = sent.message_id
+
         bot.answer_callback_query(call.id)
         return
 
@@ -1135,34 +1137,40 @@ def handle_thread_link(message):
     """Обрабатывает ссылку на сообщение и извлекает thread_id"""
     import re
     
-    chat_id = message.chat.id
+    admin_chat_id = message.chat.id
     link = message.text.strip()
     
+    print(f"🔍 handle_thread_link вызван! admin_chat_id={admin_chat_id}, текст={link}")
+    
     # Регулярка для извлечения chat_id и thread_id из ссылки
-    # Формат: https://t.me/c/2496931550/10558/30813
     match = re.search(r"t\.me/c/(\d+)/(\d+)", link)
     
     if not match:
-        bot.send_message(chat_id, "❌ Не удалось распознать ссылку.\n\n"
+        bot.send_message(admin_chat_id, "❌ Не удалось распознать ссылку.\n\n"
                          "Пришлите ссылку в формате:\n"
                          "<code>https://t.me/c/2496931550/10558/30813</code>",
                          parse_mode="HTML")
         return
     
-    chat_id_from_link = -100 * 10**9 + int(match.group(1))
+    # Правильное преобразование: добавляем -100 в начало числа из ссылки
+    chat_id_from_link = int(f"-100{match.group(1)}")
     thread_id = int(match.group(2))
     
-    # Получаем целевой chat_id группы
-    target_cid = target_chat.get(chat_id)
+    print(f"🔍 Из ссылки: chat_id={chat_id_from_link}, thread_id={thread_id}")
+    
+    # ПОЛУЧАЕМ target_cid ЗДЕСЬ, перед тем как его использовать или печатать!
+    target_cid = target_chat.get(admin_chat_id)
+    print(f"🔍 Ожидалось (из target_chat): target_cid={target_cid}")
     
     if not target_cid:
-        bot.send_message(chat_id, "❌ Ошибка: не найден целевой чат.\nНачните настройку заново через /chats")
+        bot.send_message(admin_chat_id, "❌ Ошибка: не найден целевой чат.\nНачните настройку заново через /chats")
+        waiting_photo.pop(admin_chat_id, None)
         return
     
     if chat_id_from_link != target_cid:
-        bot.send_message(chat_id, f"❌ Ссылка ведёт в другой чат!\n\n"
+        bot.send_message(admin_chat_id, f"❌ Ссылка ведёт в другой чат!\n\n"
                          f"Ожидалось: {target_cid}\n"
-                         f"Получено: {chat_id_from_link}")
+                         f"Получено из ссылки: {chat_id_from_link}")
         return
     
     # Обновляем базу данных
@@ -1175,23 +1183,23 @@ def handle_thread_link(message):
             """, (thread_id, target_cid))
         
         # Удаляем подсказку
-        msg_id = thread_prompt.pop(chat_id, None)
+        msg_id = thread_prompt.pop(admin_chat_id, None)
         if msg_id:
             try:
-                bot.delete_message(chat_id, msg_id)
+                bot.delete_message(admin_chat_id, msg_id)
             except:
                 pass
         
-        bot.send_message(chat_id, f"✅ <b>Тема успешно привязана!</b>\n\n"
+        bot.send_message(admin_chat_id, f"✅ <b>Тема успешно привязана!</b>\n\n"
                          f"Тема ID: <code>{thread_id}</code>",
                          parse_mode="HTML")
         
         # Очищаем состояние
-        waiting_photo.pop(chat_id, None)
-        target_chat.pop(chat_id, None)
+        waiting_photo.pop(admin_chat_id, None)
+        target_chat.pop(admin_chat_id, None)
         
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка при сохранении: {e}")
+        bot.send_message(admin_chat_id, f"❌ Ошибка при сохранении: {e}")
 
 
 @bot.message_handler(content_types=["photo"])
