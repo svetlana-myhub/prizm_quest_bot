@@ -27,6 +27,9 @@ from keyboards import (
     pin_bot_kb,       # ← добавили
     pin_done_kb,      # ← добавили
     daily_bonus_instruction_kb,   # ← добавили
+    daily_bonus_main_kb,       # ← если используешь
+    daily_bonus_claim_kb,      # ← добавили
+    daily_bonus_wait_kb,       # ← добавили
     start_quest_kb,               # ← добавили
 )
 from texts import (
@@ -50,6 +53,7 @@ from texts import (
     PIN_INSTRUCTION_TEXT,   # ← добавили
     DAILY_BONUS_INTRO_TEXT,       # ← добавили
     DAILY_BONUS_RECEIVED_TEXT,    # ← добавили
+    DAILY_BONUS_MENU_TEXT,
 )    
 from content.final_test import FINAL_TEST_QUESTIONS, PASSING_SCORE
 from keyboards import (
@@ -171,11 +175,12 @@ def edit_or_send(call, text, markup):
             call.message.chat.id,
             call.message.message_id,
             reply_markup=markup,
+            parse_mode="HTML",  # ← добавили
         )
     except Exception as exc:
         if "message is not modified" in str(exc):
             return
-        bot.send_message(call.message.chat.id, text, reply_markup=markup)
+        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode="HTML")  # ← добавили
 
 
 @bot.message_handler(commands=["start"])
@@ -203,6 +208,13 @@ def help_command(message):
     user = message.from_user
     db.get_or_create_user(user.id, user.username, user.first_name)
     bot.send_message(message.chat.id, HELP_TEXT, reply_markup=main_menu_kb())
+
+
+@bot.message_handler(commands=["menu"])
+def menu_command(message):
+    """Показать главное меню."""
+    db.get_or_create_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    bot.send_message(message.chat.id, MAIN_MENU_TEXT, reply_markup=main_menu_kb())
 
 
 @bot.message_handler(commands=["test"])
@@ -429,14 +441,14 @@ def show_pin_instruction(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "pin:done")
 def pin_done(call):
-    """Пользователь закрепил бота — переходим к следующему шагу."""
+    """Пользователь закрепил бота — показываем информацию о Daily Bonus."""
     bot.answer_callback_query(call.id)
-    # Пока просто показываем главное меню — потом здесь будет выбор уровня
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=MAIN_MENU_TEXT,
-        reply_markup=main_menu_kb(),
+        text=DAILY_BONUS_INTRO_TEXT,
+        parse_mode="HTML",
+        reply_markup=daily_bonus_instruction_kb(),
     )
 
 
@@ -474,6 +486,16 @@ def claim_daily_bonus(call):
 def main_menu(call):
     section = call.data.split(":", 1)[1]
     bot.answer_callback_query(call.id)
+        
+    if section == "daily_bonus":
+        can_claim, time_left = db.can_claim_daily_bonus(call.from_user.id)
+        
+        if can_claim:
+            edit_or_send(call, DAILY_BONUS_MENU_TEXT, daily_bonus_claim_kb())
+        else:
+            text = f"⏰ Вы уже получили Daily Bonus!\n\nСледующий бонус будет доступен через: {time_left}"
+            edit_or_send(call, text, daily_bonus_wait_kb(time_left))
+        return
 
     if section == "home":
         edit_or_send(call, MAIN_MENU_TEXT, main_menu_kb())
@@ -637,6 +659,30 @@ def complete_step(call, step):
         edit_or_send(call, text, back_menu_kb())
     else:
         edit_or_send(call, text, quest_next_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "bonus:claim_daily")
+def claim_daily_bonus_handler(call):
+    """Начисляем Daily Bonus."""
+    can_claim, next_time = db.can_claim_daily_bonus(call.from_user.id)
+    
+    if not can_claim:
+        bot.answer_callback_query(call.id, "Бонус ещё недоступен!")
+        return
+    
+    # Начисляем бонус
+    streak = db.claim_daily_bonus(call.from_user.id)
+    
+    bot.answer_callback_query(call.id, f"✅ +1 Prizm! Серия: {streak} дней")
+    
+    # Показываем сообщение о получении
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=DAILY_BONUS_RECEIVED_TEXT,
+        parse_mode="HTML",
+        reply_markup=start_quest_kb(),
+    )        
 
 
 @bot.message_handler(
@@ -1263,6 +1309,7 @@ if __name__ == "__main__":
     # Настраиваем список команд для обычных пользователей
     bot.set_my_commands([
         types.BotCommand("start", "Начать общение с ботом"),
+        types.BotCommand("menu", "Главное меню"),
         types.BotCommand("reset", "Сбросить прогресс и начать заново"),
         types.BotCommand("help", "Помощь и информация"),
         types.BotCommand("profile", "Мой профиль и баланс"),

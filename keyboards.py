@@ -17,14 +17,17 @@ def main_menu_kb():
         types.InlineKeyboardButton("🔷 Факты", callback_data="menu:facts"),
     )
     markup.add(
-        types.InlineKeyboardButton(" Игры", callback_data="menu:games"),
+        types.InlineKeyboardButton("🎮 Игры", callback_data="menu:games"),
         types.InlineKeyboardButton("🏅 Бейджи", callback_data="menu:badges"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("📆 Daily Bonus", callback_data="menu:daily_bonus"),  # ← добавили
     )
     markup.add(
         types.InlineKeyboardButton("🎓 Финальный тест", callback_data="test:start"),
     )
     markup.add(
-        types.InlineKeyboardButton("️ Помощь", callback_data="menu:help"),
+        types.InlineKeyboardButton("ℹ️ Помощь", callback_data="menu:help"),
     )
     return markup
 
@@ -292,5 +295,41 @@ def start_quest_kb():
     markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton(" Начать Квест", callback_data="menu:quest")
+    )
+    return markup
+
+
+def daily_bonus_main_kb():
+    """Кнопка Daily Bonus в главном меню."""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("📆 Забрать награду!", callback_data="bonus:daily")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+def daily_bonus_claim_kb():
+    """Кнопка для получения Daily Bonus."""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("✅ Забрать награду!", callback_data="bonus:claim_daily")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+def daily_bonus_wait_kb(next_time):
+    """Кнопка, когда бонус ещё недоступен (показывает время следующего)."""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(f"⏰ Следующий бонус: {next_time}", callback_data="noop")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
     )
     return markup
