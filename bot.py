@@ -1,6 +1,8 @@
 import logging
 import re
 
+import random 
+
 import telebot
 from telebot import types
 
@@ -19,7 +21,13 @@ from keyboards import (
     myths_kb,
     next_myth_kb,
     words_kb,
-    next_word_kb
+    next_word_kb,
+    captcha_kb,
+    claim_bonus_kb,
+    pin_bot_kb,       # ← добавили
+    pin_done_kb,      # ← добавили
+    daily_bonus_instruction_kb,   # ← добавили
+    start_quest_kb,               # ← добавили
 )
 from texts import (
     DISCLAIMER,
@@ -33,8 +41,16 @@ from texts import (
     QUEST_FINISHED_TEXT,
     UNKNOWN_TEXT,
     MYTHS_ALL_DONE,
-    WORDS_ALL_DONE
-)
+    WORDS_ALL_DONE,
+    CAPTCHA_TEXT,       # ← добавили
+    CAPTCHA_SUCCESS_TEXT,  # ← добавили
+    CAPTCHA_FAIL_TEXT,     # ← добавили
+    WELCOME_TEXT,       # ← добавили
+    PIN_BOT_TEXT,           # ← добавили
+    PIN_INSTRUCTION_TEXT,   # ← добавили
+    DAILY_BONUS_INTRO_TEXT,       # ← добавили
+    DAILY_BONUS_RECEIVED_TEXT,    # ← добавили
+)    
 from content.final_test import FINAL_TEST_QUESTIONS, PASSING_SCORE
 from keyboards import (
     final_test_start_kb,
@@ -166,7 +182,20 @@ def edit_or_send(call, text, markup):
 def start(message):
     user = message.from_user
     db.get_or_create_user(user.id, user.username, user.first_name)
-    bot.send_message(message.chat.id, DISCLAIMER, reply_markup=level_kb())
+    
+    # Проверяем, пройдена ли капча
+    user_data = db.get_user(user.id)
+    if user_data and user_data.get("captcha_passed"):
+        # Капча уже пройдена — показываем приветственное сообщение
+        bot.send_message(
+            message.chat.id,
+            WELCOME_TEXT,
+            parse_mode="HTML",
+            reply_markup=claim_bonus_kb(),
+        )
+    else:
+        # Нужно пройти капчу
+        send_captcha(message.chat.id)
 
 
 @bot.message_handler(commands=["help"])
@@ -196,13 +225,6 @@ def test_command(message):
     fake_call = FakeCall(message.from_user.id, message.chat.id)
     start_final_test(fake_call)
     bot.send_message(message.chat.id, "🎓 Финальный тест запущен!")
-
-
-@bot.message_handler(commands=["reset"])
-def reset_progress(message):
-    tg_id = message.from_user.id
-    db.reset_user_progress(tg_id)
-    bot.send_message(message.chat.id, "✅ Ваш прогресс сброшен. Начинаем заново!")
 
 
 def get_level_text(level):
@@ -307,6 +329,41 @@ def reset_progress(message):
     bot.send_message(message.chat.id, "✅ Ваш прогресс сброшен. Начинаем заново!")    
 
 
+@bot.message_handler(commands=["admin_reset"])
+def admin_reset(message):
+    """Админский сброс прогресса любого пользователя по его Telegram ID."""
+    # Проверка прав админа
+    if message.from_user.id not in ADMIN_TG_IDS:
+        bot.send_message(message.chat.id, " Эта команда только для администратора.")
+        return
+    
+    # Парсим ID пользователя из сообщения: /admin_reset 123456789
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].isdigit():
+        bot.send_message(
+            message.chat.id,
+            "Использование: /admin_reset <telegram_id>\n\n"
+            "Пример: /admin_reset 123456789",
+        )
+        return
+    
+    target_tg_id = int(parts[1])
+    
+    # Проверяем, существует ли такой пользователь
+    user = db.get_user(target_tg_id)
+    if not user:
+        bot.send_message(message.chat.id, f"❌ Пользователь с ID {target_tg_id} не найден в базе.")
+        return
+    
+    # Сбрасываем прогресс
+    db.reset_user_progress(target_tg_id)
+    
+    bot.send_message(
+        message.chat.id,
+        f"✅ Прогресс пользователя {target_tg_id} полностью сброшен.",
+    )    
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("level:"))
 def choose_level(call):
     level = call.data.split(":", 1)[1]
@@ -318,6 +375,101 @@ def choose_level(call):
     edit_or_send(call, MAIN_MENU_TEXT, main_menu_kb())
 
 
+@bot.callback_query_handler(func=lambda call: call.data == "captcha:done")
+def after_captcha(call):
+    """Обработчик кнопки 'Продолжить' после капчи."""
+    bot.answer_callback_query(call.id)
+    # Показываем приветственное сообщение с кнопкой получения бонуса
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=WELCOME_TEXT,
+        parse_mode="HTML",
+        reply_markup=WELCOME_TEXT,
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "bonus:claim")
+def claim_bonus(call):
+    """Начисляем приветственный бонус 10 Prizm."""
+    # Проверяем, не получал ли уже бонус
+    user = db.get_user(call.from_user.id)
+    if user and user.get("welcome_bonus_claimed"):
+        bot.answer_callback_query(call.id, "Вы уже получили приветственный бонус!")
+        return
+    
+    # Начисляем 10 кристаллов
+    db.add_crystals(call.from_user.id, 10, "welcome_bonus")
+    
+    # Отмечаем, что бонус получен
+    db.mark_welcome_bonus_claimed(call.from_user.id)
+    
+    bot.answer_callback_query(call.id, "✅ +10 Prizm!")
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=PIN_BOT_TEXT,
+        parse_mode="HTML",
+        reply_markup=pin_bot_kb(),
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "pin:instruction")
+def show_pin_instruction(call):
+    """Показывает инструкцию по закреплению бота."""
+    bot.answer_callback_query(call.id)
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=PIN_INSTRUCTION_TEXT,
+        parse_mode="HTML",
+        reply_markup=pin_done_kb(),
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "pin:done")
+def pin_done(call):
+    """Пользователь закрепил бота — переходим к следующему шагу."""
+    bot.answer_callback_query(call.id)
+    # Пока просто показываем главное меню — потом здесь будет выбор уровня
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=MAIN_MENU_TEXT,
+        reply_markup=main_menu_kb(),
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "pin:done")
+def pin_done(call):
+    """Пользователь закрепил бота — показываем информацию о Daily Bonus."""
+    bot.answer_callback_query(call.id)
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=DAILY_BONUS_INTRO_TEXT,
+        parse_mode="HTML",
+        reply_markup=daily_bonus_instruction_kb(),
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "bonus:daily")
+def claim_daily_bonus(call):
+    """Начисляем ежедневный бонус."""
+    # Здесь будет логика проверки кулдауна 24 часа и начисления
+    # Пока просто показываем сообщение о получении
+    db.add_crystals(call.from_user.id, 1, "daily_bonus")
+    
+    bot.answer_callback_query(call.id, "✅ +1 Prizm!")
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=DAILY_BONUS_RECEIVED_TEXT,
+        parse_mode="HTML",
+        reply_markup=start_quest_kb(),
+    )
+
+        
 @bot.callback_query_handler(func=lambda call: call.data.startswith("menu:"))
 def main_menu(call):
     section = call.data.split(":", 1)[1]
@@ -1035,10 +1187,86 @@ def admin_export(message):
     finally:
         os.unlink(temp_path)
 
-
-# === КОНЕЦ АДМИН-КОМАНД ===
     
+# === КОНЕЦ: АДМИН-КОМАНД ===
+
+
+def generate_captcha_question():
+    """Генерирует простой математический пример и варианты ответов."""
+    a = random.randint(1, 9)
+    b = random.randint(1, 9)
+    correct = a + b
+    
+    wrong_options = set()
+    while len(wrong_options) < 2:
+        wrong = correct + random.choice([-2, -1, 1, 2])
+        if wrong > 0 and wrong != correct:
+            wrong_options.add(wrong)
+    
+    options = [correct] + list(wrong_options)
+    random.shuffle(options)
+    
+    return {
+        "text": f"Сколько будет {a} + {b}?",
+        "correct": correct,
+        "options": options,
+    }
+
+
+def send_captcha(chat_id):
+    """Показывает пользователю новую капчу."""
+    q = generate_captcha_question()
+    bot.send_message(
+        chat_id,
+        f"{CAPTCHA_TEXT}\n\n<b>{q['text']}</b>",
+        parse_mode="HTML",
+        reply_markup=captcha_kb(q["correct"], q["options"]),
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("captcha:"))
+def handle_captcha(call):
+    """Обрабатывает ответ на капчу."""
+    parts = call.data.split(":")
+    result = parts[1]
+    correct_answer = int(parts[2])
+    
+    if result == "ok":
+        # Правильный ответ — отмечаем, что капча пройдена
+        db.set_captcha_passed(call.from_user.id)
+        bot.answer_callback_query(call.id, "✅ Верно!")
+        # Показываем приветственное сообщение с кнопкой получения награды
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=WELCOME_TEXT,
+            parse_mode="HTML",
+            reply_markup=claim_bonus_kb(),
+        )
+
+    else:
+        bot.answer_callback_query(call.id, "Неверно, попробуй ещё раз")
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=CAPTCHA_FAIL_TEXT.format(correct=correct_answer),
+            parse_mode="HTML",
+        )
+        import time
+        time.sleep(1.5)
+        send_captcha(call.message.chat.id)
+
 
 if __name__ == "__main__":
     logging.info("Бот запускается...")
+    
+    # Настраиваем список команд для обычных пользователей
+    bot.set_my_commands([
+        types.BotCommand("start", "Начать общение с ботом"),
+        types.BotCommand("reset", "Сбросить прогресс и начать заново"),
+        types.BotCommand("help", "Помощь и информация"),
+        types.BotCommand("profile", "Мой профиль и баланс"),
+        types.BotCommand("test", "Пройти финальный тест"),
+    ])
+    
     bot.infinity_polling()

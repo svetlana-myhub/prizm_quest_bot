@@ -23,8 +23,11 @@ CREATE TABLE IF NOT EXISTS users (
     ton_wallet TEXT,
     invited_by INTEGER,
     referral_code TEXT,
-    referrals_count INTEGER NOT NULL DEFAULT 0
+    referrals_count INTEGER NOT NULL DEFAULT 0,
+    captcha_passed INTEGER NOT NULL DEFAULT 0,
+    welcome_bonus_claimed INTEGER NOT NULL DEFAULT 0
 );
+
 
 CREATE TABLE IF NOT EXISTS fact_progress (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +137,8 @@ def init_db():
             "ALTER TABLE users ADD COLUMN invited_by INTEGER",
             "ALTER TABLE users ADD COLUMN referral_code TEXT",
             "ALTER TABLE users ADD COLUMN referrals_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN captcha_passed INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN welcome_bonus_claimed INTEGER NOT NULL DEFAULT 0", 
         ]
         
         for sql in new_columns:
@@ -194,6 +199,37 @@ def set_level(tg_id, level):
             WHERE tg_id = ?
             """,
             (level, tg_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_captcha_passed(tg_id):
+    """Отмечаем, что пользователь прошёл капчу."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            UPDATE users
+            SET captcha_passed = 1,
+                updated_at = datetime('now')
+            WHERE tg_id = ?
+            """,
+            (tg_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def mark_welcome_bonus_claimed(tg_id):
+    """Отмечаем, что пользователь получил приветственный бонус."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET welcome_bonus_claimed = 1 WHERE tg_id = ?",
+            (tg_id,),
         )
         conn.commit()
     finally:
@@ -464,11 +500,17 @@ def reset_user_progress(tg_id):
     conn = get_connection()
     try:
         conn.execute(
-            """UPDATE users SET 
-               crystals = 0,
-               final_test_passed = 0,
-               prizm_address = NULL
-               WHERE tg_id = ?""",
+            """UPDATE users SET
+                crystals = 0,
+                final_test_passed = 0,
+                prizm_address = NULL,
+                captcha_passed = 0,
+                welcome_bonus_claimed = 0,
+                level = NULL,
+                state = 'START',
+                consent_at = NULL,
+                updated_at = datetime('now')
+            WHERE tg_id = ?""",
             (tg_id,),
         )
         # Удаляем все записи о пройденном контенте

@@ -216,3 +216,81 @@ def final_test_retry_kb():
         types.InlineKeyboardButton(" Главное меню", callback_data="menu:home")
     )
     return markup
+
+
+def captcha_kb(correct_answer, options):
+    """
+    Клавиатура капчи.
+    correct_answer — правильный ответ (int), нужен для проверки в callback.
+    options — список из 3 вариантов ответа (int), уже перемешанный.
+    """
+    markup = types.InlineKeyboardMarkup()
+    
+    # Собираем все 3 кнопки в один список
+    buttons = []
+    for option in options:
+        if option == correct_answer:
+            buttons.append(
+                types.InlineKeyboardButton(
+                    str(option),
+                    callback_data=f"captcha:ok:{correct_answer}",
+                )
+            )
+        else:
+            buttons.append(
+                types.InlineKeyboardButton(
+                    str(option),
+                    callback_data=f"captcha:fail:{correct_answer}",
+                )
+            )
+    
+    # Добавляем все три кнопки ОДНИМ вызовом — они встанут в один ряд
+    markup.add(*buttons)
+    
+    return markup
+
+
+def claim_bonus_kb():
+    """Кнопка для получения приветственного бонуса."""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("🎁 Получить награду", callback_data="bonus:claim")
+    )
+    return markup
+
+
+def pin_bot_kb():
+    """Кнопки после получения бонуса — закрепление бота."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("✅ Готово, я закрепил(а) бота!", callback_data="pin:done"),
+        types.InlineKeyboardButton("🛠 Показать инструкцию", callback_data="pin:instruction"),
+    )
+    return markup
+
+
+def pin_done_kb():
+    """Кнопка после прочтения инструкции."""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("✅ Отлично, я закрепил(а) бота!", callback_data="pin:done")
+    )
+    return markup
+
+
+def daily_bonus_instruction_kb():
+    """Кнопка после сообщения о Daily Bonus — переход в меню."""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+def start_quest_kb():
+    """Кнопка после получения Daily Bonus — начать квест."""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(" Начать Квест", callback_data="menu:quest")
+    )
+    return markup
