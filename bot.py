@@ -54,6 +54,7 @@ from texts import (
     DAILY_BONUS_INTRO_TEXT,       # ← добавили
     DAILY_BONUS_RECEIVED_TEXT,    # ← добавили
     DAILY_BONUS_MENU_TEXT,
+    REWARD_ALREADY_CLAIMED,
 )    
 from content.final_test import FINAL_TEST_QUESTIONS, PASSING_SCORE
 from keyboards import (
