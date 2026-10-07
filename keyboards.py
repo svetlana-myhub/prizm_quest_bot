@@ -253,11 +253,14 @@ def captcha_kb(correct_answer, options):
     return markup
 
 
-def claim_bonus_kb():
-    """Кнопка для получения приветственного бонуса."""
-    markup = types.InlineKeyboardMarkup()
+def welcome_kb():
+    """Клавиатура после приветственного сообщения. Всегда показывает кнопку получения награды."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(
         types.InlineKeyboardButton("🎁 Получить награду", callback_data="bonus:claim")
+    )
+    markup.add(
+        types.InlineKeyboardButton("ℹ️ Помощь", callback_data="menu:help")
     )
     return markup
 

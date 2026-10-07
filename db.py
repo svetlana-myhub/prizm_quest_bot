@@ -242,7 +242,6 @@ def can_claim_daily_bonus(tg_id):
     """
     Проверяет, можно ли получить Daily Bonus (сброс в 00:00).
     Возвращает (can_claim: bool, time_left: str или None)
-    time_left — сколько осталось до полуночи в формате "Xч Yмин"
     """
     conn = get_connection()
     try:
@@ -252,17 +251,14 @@ def can_claim_daily_bonus(tg_id):
         ).fetchone()
         
         if not row or not row["last_daily_bonus"]:
-            # Ещё никогда не получал
             return True, None
         
         last_date = datetime.fromisoformat(row["last_daily_bonus"]).date()
         today = datetime.now().date()
         
         if last_date < today:
-            # Последний бонус был не сегодня — можно забрать
             return True, None
         else:
-            # Сегодня уже получал — считаем время до полуночи
             now = datetime.now()
             midnight = datetime.combine(today + timedelta(days=1), datetime.min.time())
             time_left = midnight - now

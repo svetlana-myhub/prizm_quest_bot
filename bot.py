@@ -23,7 +23,7 @@ from keyboards import (
     words_kb,
     next_word_kb,
     captcha_kb,
-    claim_bonus_kb,
+    welcome_kb,          # ← добавили
     pin_bot_kb,       # ← добавили
     pin_done_kb,      # ← добавили
     daily_bonus_instruction_kb,   # ← добавили
@@ -189,15 +189,14 @@ def start(message):
     user = message.from_user
     db.get_or_create_user(user.id, user.username, user.first_name)
     
-    # Проверяем, пройдена ли капча
     user_data = db.get_user(user.id)
     if user_data and user_data.get("captcha_passed"):
-        # Капча уже пройдена — показываем приветственное сообщение
+        # Капча уже пройдена — показываем приветствие
         bot.send_message(
             message.chat.id,
             WELCOME_TEXT,
             parse_mode="HTML",
-            reply_markup=claim_bonus_kb(),
+            reply_markup=welcome_kb(),
         )
     else:
         # Нужно пройти капчу
@@ -208,7 +207,12 @@ def start(message):
 def help_command(message):
     user = message.from_user
     db.get_or_create_user(user.id, user.username, user.first_name)
-    bot.send_message(message.chat.id, HELP_TEXT, reply_markup=main_menu_kb())
+    bot.send_message(
+        message.chat.id,
+        HELP_TEXT,
+        parse_mode="HTML",  # ← добавили
+        reply_markup=main_menu_kb(),
+    )
 
 
 @bot.message_handler(commands=["menu"])
@@ -339,7 +343,7 @@ def profile(message):
 def reset_progress(message):
     tg_id = message.from_user.id
     db.reset_user_progress(tg_id)
-    bot.send_message(message.chat.id, "✅ Ваш прогресс сброшен. Начинаем заново!")    
+    bot.send_message(message.chat.id, "✅ Ваш прогресс сброшен. Начинаем заново!")
 
 
 @bot.message_handler(commands=["admin_reset"])
@@ -388,36 +392,23 @@ def choose_level(call):
     edit_or_send(call, MAIN_MENU_TEXT, main_menu_kb())
 
 
-@bot.callback_query_handler(func=lambda call: call.data == "captcha:done")
-def after_captcha(call):
-    """Обработчик кнопки 'Продолжить' после капчи."""
-    bot.answer_callback_query(call.id)
-    # Показываем приветственное сообщение с кнопкой получения бонуса
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=WELCOME_TEXT,
-        parse_mode="HTML",
-        reply_markup=WELCOME_TEXT,
-    )
-
-
 @bot.callback_query_handler(func=lambda call: call.data == "bonus:claim")
 def claim_bonus(call):
     """Начисляем приветственный бонус 10 Prizm."""
-    # Проверяем, не получал ли уже бонус
     user = db.get_user(call.from_user.id)
+    
     if user and user.get("welcome_bonus_claimed"):
+        # Бонус уже получен
         bot.answer_callback_query(call.id, "Вы уже получили приветственный бонус!")
         return
     
-    # Начисляем 10 кристаллов
+    # Начисляем бонус
     db.add_crystals(call.from_user.id, 10, "welcome_bonus")
-    
-    # Отмечаем, что бонус получен
     db.mark_welcome_bonus_claimed(call.from_user.id)
     
     bot.answer_callback_query(call.id, "✅ +10 Prizm!")
+    
+    # Показываем сообщение про закрепление бота
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
@@ -538,7 +529,7 @@ def main_menu(call):
         return
 
     if section == "help":
-        edit_or_send(call, HELP_TEXT, back_menu_kb())
+        edit_or_send(call, HELP_TEXT, main_menu_kb())
         return
 
 
@@ -1279,18 +1270,15 @@ def handle_captcha(call):
     correct_answer = int(parts[2])
     
     if result == "ok":
-        # Правильный ответ — отмечаем, что капча пройдена
         db.set_captcha_passed(call.from_user.id)
         bot.answer_callback_query(call.id, "✅ Верно!")
-        # Показываем приветственное сообщение с кнопкой получения награды
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
             text=WELCOME_TEXT,
             parse_mode="HTML",
-            reply_markup=claim_bonus_kb(),
+            reply_markup=welcome_kb(),
         )
-
     else:
         bot.answer_callback_query(call.id, "Неверно, попробуй ещё раз")
         bot.edit_message_text(
