@@ -31,6 +31,22 @@ from keyboards import (
     daily_bonus_claim_kb,      # ← добавили
     daily_bonus_wait_kb,       # ← добавили
     start_quest_kb,               # ← добавили
+        # --- НОВЫЕ КЛАВИАТУРЫ ---
+    main_menu_kb,
+    academy_kb,
+    instructions_kb,
+    profile_kb,
+    referrals_kb,
+    achievements_kb,
+    wallet_kb,
+    buy_pzm_kb,
+    airdrop_kb,
+    daily_bonus_menu_kb,
+    start_kb,
+    help_kb,
+    settings_kb,
+    games_kb,
+    back_menu_kb,
 )
 from texts import (
     DISCLAIMER,
@@ -55,6 +71,20 @@ from texts import (
     DAILY_BONUS_RECEIVED_TEXT,    # ← добавили
     DAILY_BONUS_MENU_TEXT,
     REWARD_ALREADY_CLAIMED,
+    # --- НОВЫЕ ТЕКСТЫ ---
+    ACADEMY_TEXT,
+    PROFILE_TEXT,
+    WALLET_TEXT,
+    BUY_TEXT,
+    AIRDROP_TEXT,
+    HELP_TEXT_NEW,
+    SETTINGS_TEXT,
+    GAMES_TEXT,
+    START_TEXT,
+    INSTRUCTIONS_TEXT,
+    REFERRALS_TEXT,
+    ACHIEVEMENTS_TEXT,
+    BUY_INSTRUCTIONS_TEXT,
 )    
 from content.final_test import FINAL_TEST_QUESTIONS, PASSING_SCORE
 from keyboards import (
@@ -456,81 +486,64 @@ def pin_done(call):
         reply_markup=daily_bonus_instruction_kb(),
     )
 
-
-@bot.callback_query_handler(func=lambda call: call.data == "bonus:daily")
-def claim_daily_bonus(call):
-    """Начисляем ежедневный бонус."""
-    # Здесь будет логика проверки кулдауна 24 часа и начисления
-    # Пока просто показываем сообщение о получении
-    db.add_crystals(call.from_user.id, 1, "daily_bonus")
-    
-    bot.answer_callback_query(call.id, "✅ +1 Prizm!")
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=DAILY_BONUS_RECEIVED_TEXT,
-        parse_mode="HTML",
-        reply_markup=start_quest_kb(),
-    )
-
         
-@bot.callback_query_handler(func=lambda call: call.data.startswith("menu:"))
-def main_menu(call):
-    section = call.data.split(":", 1)[1]
-    bot.answer_callback_query(call.id)
+# @bot.callback_query_handler(func=lambda call: call.data.startswith("menu:"))
+# def main_menu(call):
+#     section = call.data.split(":", 1)[1]
+#     bot.answer_callback_query(call.id)
         
-    if section == "daily_bonus":
-        can_claim, time_left = db.can_claim_daily_bonus(call.from_user.id)
+#     if section == "daily_bonus":
+#         can_claim, time_left = db.can_claim_daily_bonus(call.from_user.id)
         
-        if can_claim:
-            edit_or_send(call, DAILY_BONUS_MENU_TEXT, daily_bonus_claim_kb())
-        else:
-            text = f"⏰ Вы уже получили Daily Bonus!\n\nСледующий бонус будет доступен через: {time_left}"
-            edit_or_send(call, text, daily_bonus_wait_kb(time_left))
-        return
+#         if can_claim:
+#             edit_or_send(call, DAILY_BONUS_MENU_TEXT, daily_bonus_claim_kb())
+#         else:
+#             text = f"⏰ Вы уже получили Daily Bonus!\n\nСледующий бонус будет доступен через: {time_left}"
+#             edit_or_send(call, text, daily_bonus_wait_kb(time_left))
+#         return
 
-    if section == "home":
-        edit_or_send(call, MAIN_MENU_TEXT, main_menu_kb())
-        return
+#     if section == "home":
+#         edit_or_send(call, MAIN_MENU_TEXT, main_menu_kb())
+#         return
 
-    if section == "facts":
-        fact = find_next_fact(call.from_user.id)
-        if fact is None:
-            edit_or_send(call, FACTS_ALL_DONE, back_menu_kb())
-        else:
-            edit_or_send(call, format_fact(fact), fact_read_kb(fact["id"]))
-        return
+#     if section == "facts":
+#         fact = find_next_fact(call.from_user.id)
+#         if fact is None:
+#             edit_or_send(call, FACTS_ALL_DONE, back_menu_kb())
+#         else:
+#             edit_or_send(call, format_fact(fact), fact_read_kb(fact["id"]))
+#         return
 
-    if section == "quest":
-        step = find_next_step(call.from_user.id)
-        if step is None:
-            edit_or_send(call, QUEST_ALL_DONE_TEXT, back_menu_kb())
-        else:
-            edit_or_send(call, format_step(step), step_start_kb(step))
-        return
+#     if section == "quest":
+#         step = find_next_step(call.from_user.id)
+#         if step is None:
+#             edit_or_send(call, QUEST_ALL_DONE_TEXT, back_menu_kb())
+#         else:
+#             edit_or_send(call, format_step(step), step_start_kb(step))
+#         return
 
-    if section == "badges":
-        badges = db.get_user_badges(call.from_user.id)
-        if badges:
-            text = "🏅 Ваши бейджи:\n\n" + "\n".join(f"— {b}" for b in badges)
-        else:
-            text = NO_BADGES_TEXT
-        edit_or_send(call, text, back_menu_kb())
-        return
+#     if section == "badges":
+#         badges = db.get_user_badges(call.from_user.id)
+#         if badges:
+#             text = "🏅 Ваши бейджи:\n\n" + "\n".join(f"— {b}" for b in badges)
+#         else:
+#             text = NO_BADGES_TEXT
+#         edit_or_send(call, text, back_menu_kb())
+#         return
 
-    if section == "games":
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(
-            types.InlineKeyboardButton(" Миф или правда", callback_data="myth:start"),
-            types.InlineKeyboardButton(" Отгадай слово", callback_data="word:start"),
-        )
-        markup.add(types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home"))
-        edit_or_send(call, "Выберите игру:", markup)
-        return
+#     if section == "games":
+#         markup = types.InlineKeyboardMarkup(row_width=1)
+#         markup.add(
+#             types.InlineKeyboardButton(" Миф или правда", callback_data="myth:start"),
+#             types.InlineKeyboardButton(" Отгадай слово", callback_data="word:start"),
+#         )
+#         markup.add(types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home"))
+#         edit_or_send(call, "Выберите игру:", markup)
+#         return
 
-    if section == "help":
-        edit_or_send(call, HELP_TEXT, main_menu_kb())
-        return
+#     if section == "help":
+#         edit_or_send(call, HELP_TEXT, main_menu_kb())
+#         return
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fact:"))
@@ -588,6 +601,22 @@ def fact_flow(call):
             edit_or_send(call, result_text, next_fact_kb())
         else:
             bot.answer_callback_query(call.id, "Неверно, попробуй ещё раз 😉")
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "academy:old_quest")
+def start_old_quest(call):
+    """Запуск старого квеста (Демо-квест) из Академии."""
+    bot.answer_callback_query(call.id)
+    
+    # Находим первый шаг квеста
+    step = find_next_step(call.from_user.id)
+    
+    if step is None:
+        # Если квест уже пройден — показываем сообщение о завершении
+        edit_or_send(call, QUEST_ALL_DONE_TEXT, back_menu_kb("menu:academy"))
+    else:
+        # Показываем первый шаг
+        edit_or_send(call, format_step(step), step_start_kb(step))
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("quest:"))
@@ -659,7 +688,7 @@ def claim_daily_bonus_handler(call):
     can_claim, next_time = db.can_claim_daily_bonus(call.from_user.id)
     
     if not can_claim:
-        bot.answer_callback_query(call.id, "Бонус ещё недоступен!")
+        bot.answer_callback_query(call.id, f"⏰ Бонус ещё недоступен! Следующий через: {next_time}")
         return
     
     # Начисляем бонус
@@ -673,8 +702,15 @@ def claim_daily_bonus_handler(call):
         message_id=call.message.message_id,
         text=DAILY_BONUS_RECEIVED_TEXT,
         parse_mode="HTML",
-        reply_markup=start_quest_kb(),
-    )        
+        reply_markup=start_quest_kb(),  # ← здесь теперь кнопка "🚀 СТАРТ"
+    )   
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:academy")
+def show_academy(call):
+    """Показать меню Академии PRIZM."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, ACADEMY_TEXT, academy_kb())
 
 
 @bot.message_handler(
@@ -1290,6 +1326,232 @@ def handle_captcha(call):
         import time
         time.sleep(1.5)
         send_captcha(call.message.chat.id)
+
+# ==============================================================================
+# ОБРАБОТЧИКИ НОВОГО ГЛАВНОГО МЕНЮ
+# ==============================================================================
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:home")
+def show_main_menu(call):
+    """Главное меню."""
+    bot.answer_callback_query(call.id)
+    user = db.get_user(call.from_user.id)
+    balance = user.get("crystals", 0) if user else 0
+    referral_link = f"https://t.me/PrizmQuestBot?start=ref{call.from_user.id}"
+    
+    text = (
+        f"Здравствуйте, {call.from_user.first_name}! 👋\n\n"
+        f"💎 <b>Ваш баланс:</b> {balance} PZM\n"
+        f"🔗 <b>Ваша реферальная ссылка:</b>\n"
+        f"<code>{referral_link}</code>\n\n"
+        f"🎯 Увеличьте свой баланс прямо сейчас! Пройдите интерактивное обучение "
+        f"с наградами по кнопке <b>🚀 СТАРТ</b> 👇"
+    )
+    edit_or_send(call, text, main_menu_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:daily_bonus")
+def show_daily_bonus(call):
+    """Раздел Daily Bonus в главном меню."""
+    bot.answer_callback_query(call.id)
+    can_claim, time_left = db.can_claim_daily_bonus(call.from_user.id)
+
+    if can_claim:
+        edit_or_send(call, DAILY_BONUS_MENU_TEXT, daily_bonus_claim_kb())
+    else:
+        text = (
+            f"⏰ Вы уже получили Daily Bonus сегодня!\n\n"
+            f"Следующий бонус будет доступен через: <b>{time_left}</b>"
+        )
+        edit_or_send(call, text, daily_bonus_wait_kb(time_left))
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:academy")
+def show_academy(call):
+    """Академия PRIZM."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, ACADEMY_TEXT, academy_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:start")
+def show_start(call):
+    """Кнопка СТАРТ — начало обучения."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, START_TEXT, start_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:profile")
+def show_profile(call):
+    """Профиль."""
+    bot.answer_callback_query(call.id)
+    user = db.get_user(call.from_user.id)
+    balance = user.get("crystals", 0) if user else 0
+    achievements = user.get("achievements", 0) if user else 0
+    referrals = user.get("referrals_count", 0) if user else 0
+    
+    text = PROFILE_TEXT.format(
+        balance=balance,
+        achievements=achievements,
+        referrals=referrals
+    )
+    edit_or_send(call, text, profile_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:wallet")
+def show_wallet(call):
+    """Кошелек."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, WALLET_TEXT, wallet_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:buy")
+def show_buy(call):
+    """Купить PZM."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, BUY_TEXT, buy_pzm_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:airdrop")
+def show_airdrop(call):
+    """PRIZM Airdrop."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, AIRDROP_TEXT, airdrop_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:settings")
+def show_settings(call):
+    """Настройки."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, SETTINGS_TEXT, settings_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:games")
+def show_games(call):
+    """Игры: Миф или правда + Отгадай слово."""
+    bot.answer_callback_query(call.id)
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🎭 Миф или правда", callback_data="myth:start"),
+        types.InlineKeyboardButton("🔤 Отгадай слово", callback_data="word:start"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home")
+    )
+
+    edit_or_send(call, "<b>🎮 Игры</b>\n\nВыберите игру:", markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu:help")
+def show_help(call):
+    """Помощь."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, HELP_TEXT_NEW, help_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "academy:instructions")
+def show_instructions(call):
+    """Инструкции."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, INSTRUCTIONS_TEXT, instructions_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "profile:referrals")
+def show_referrals(call):
+    """Рефералы."""
+    bot.answer_callback_query(call.id)
+    user = db.get_user(call.from_user.id)
+    referral_link = f"https://t.me/PrizmQuestBot?start=ref{call.from_user.id}"
+    referrals_count = user.get("referrals_count", 0) if user else 0
+    
+    text = REFERRALS_TEXT.format(
+        referral_link=referral_link,
+        referrals_count=referrals_count
+    )
+    edit_or_send(call, text, referrals_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "profile:achievements")
+def show_achievements(call):
+    """Достижения."""
+    bot.answer_callback_query(call.id)
+    user = db.get_user(call.from_user.id)
+    badges_count = user.get("badges_count", 0) if user else 0
+    
+    text = ACHIEVEMENTS_TEXT.format(badges_count=badges_count)
+    edit_or_send(call, text, achievements_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "academy:final_test")
+def show_final_test(call):
+    """Показать финальный тест (перенаправление на старую логику)."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, "🎓 Готовы пройти финальный тест?", final_test_start_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "buy:instructions")
+def show_buy_instructions(call):
+    """Инструкции по покупке."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, BUY_INSTRUCTIONS_TEXT, instructions_kb())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "academy:crypto_alphabet")
+def show_crypto_alphabet(call):
+    """Старые факты (Крипто-азбука) — 10 уроков про блокчейн."""
+    bot.answer_callback_query(call.id)
+    fact = find_next_fact(call.from_user.id)
+    if fact is None:
+        edit_or_send(call, FACTS_ALL_DONE, back_menu_kb("menu:academy"))
+    else:
+        edit_or_send(call, format_fact(fact), fact_read_kb(fact["id"]))
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "academy:old_quest")
+def show_old_quest(call):
+    """Старый квест (Демо-квест)."""
+    bot.answer_callback_query(call.id)
+    step = find_next_step(call.from_user.id)
+    if step is None:
+        edit_or_send(call, QUEST_ALL_DONE_TEXT, back_menu_kb("menu:academy"))
+    else:
+        edit_or_send(call, format_step(step), step_start_kb(step))
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "ach:badges")
+def show_badges(call):
+    """Мои бейджи."""
+    bot.answer_callback_query(call.id)
+    badges = db.get_user_badges(call.from_user.id)
+    if badges:
+        text = "🏅 Ваши бейджи:\n\n" + "\n".join(f"— {b}" for b in badges)
+    else:
+        text = NO_BADGES_TEXT
+    edit_or_send(call, text, back_menu_kb("menu:profile"))
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "academy:final_test")
+def show_final_test(call):
+    """Финальный тест."""
+    bot.answer_callback_query(call.id)
+    edit_or_send(call, "🎓 Готовы пройти финальный тест?", final_test_start_kb())
+
+
+# Заглушки для кнопок, которые пока не реализованы
+@bot.callback_query_handler(func=lambda call: call.data in (
+    "academy:facts_start", "academy:quest",
+    "academy:myths", "academy:paramining",
+    "academy:glossary", "inst:buy", "inst:withdraw", "inst:sell",
+    "profile:balance", "profile:stats", "ref:my_link", "ref:my_referrals",
+    "ref:rules", "ref:stats", "ach:history",
+    "wallet:ton", "wallet:prizm", "wallet:deposit", "wallet:withdraw",
+    "buy:rate", "buy:chart", "buy:calc", "airdrop:promo", "airdrop:box",
+    "help:ask", "help:commands", "help:about", "settings:lang_ru",
+    "settings:notifications", "games:stub"
+))
+def stub_handler(call):
+    """Заглушка для кнопок, которые пока не реализованы."""
+    bot.answer_callback_query(call.id, "🚧 Раздел в разработке", show_alert=True)
 
 
 if __name__ == "__main__":

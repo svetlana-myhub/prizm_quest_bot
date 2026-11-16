@@ -1,33 +1,15 @@
 from telebot import types
 
 
+# ==============================================================================
+# СТАРЫЕ ФУНКЦИИ (СОХРАНЕНЫ БЕЗ ИЗМЕНЕНИЙ)
+# ==============================================================================
+
 def level_kb():
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(
         types.InlineKeyboardButton("🌱 Новичок", callback_data="level:newbie"),
         types.InlineKeyboardButton("🚀 Уже знаком", callback_data="level:known"),
-    )
-    return markup
-
-
-def main_menu_kb():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🎯 Квест", callback_data="menu:quest"),
-        types.InlineKeyboardButton("🔷 Факты", callback_data="menu:facts"),
-    )
-    markup.add(
-        types.InlineKeyboardButton("🎮 Игры", callback_data="menu:games"),
-        types.InlineKeyboardButton("🏅 Бейджи", callback_data="menu:badges"),
-    )
-    markup.add(
-        types.InlineKeyboardButton("📆 Daily Bonus", callback_data="menu:daily_bonus"),  # ← добавили
-    )
-    markup.add(
-        types.InlineKeyboardButton("🎓 Финальный тест", callback_data="test:start"),
-    )
-    markup.add(
-        types.InlineKeyboardButton("ℹ️ Помощь", callback_data="menu:help"),
     )
     return markup
 
@@ -60,14 +42,6 @@ def next_fact_kb():
     markup.add(
         types.InlineKeyboardButton("➡️ Следующий факт", callback_data="fact:next")
     )
-    markup.add(
-        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
-    )
-    return markup
-
-
-def back_menu_kb():
-    markup = types.InlineKeyboardMarkup()
     markup.add(
         types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
     )
@@ -205,7 +179,7 @@ def final_test_result_kb():
         types.InlineKeyboardButton("🏆 Получить награду", callback_data="reward:claim")
     )
     markup.add(
-        types.InlineKeyboardButton(" Главное меню", callback_data="menu:home")
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
     )
     return markup
 
@@ -216,7 +190,7 @@ def final_test_retry_kb():
         types.InlineKeyboardButton("🔄 Попробовать снова", callback_data="test:start")
     )
     markup.add(
-        types.InlineKeyboardButton(" Главное меню", callback_data="menu:home")
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
     )
     return markup
 
@@ -229,7 +203,6 @@ def captcha_kb(correct_answer, options):
     """
     markup = types.InlineKeyboardMarkup()
     
-    # Собираем все 3 кнопки в один список
     buttons = []
     for option in options:
         if option == correct_answer:
@@ -247,14 +220,13 @@ def captcha_kb(correct_answer, options):
                 )
             )
     
-    # Добавляем все три кнопки ОДНИМ вызовом — они встанут в один ряд
     markup.add(*buttons)
     
     return markup
 
 
 def welcome_kb():
-    """Клавиатура после приветственного сообщения. Всегда показывает кнопку получения награды."""
+    """Клавиатура после приветственного сообщения."""
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(
         types.InlineKeyboardButton("🎁 Получить награду", callback_data="bonus:claim")
@@ -293,11 +265,14 @@ def daily_bonus_instruction_kb():
     return markup
 
 
-def start_quest_kb():
-    """Кнопка после получения Daily Bonus — начать квест."""
-    markup = types.InlineKeyboardMarkup()
+def after_daily_bonus_kb():
+    """Кнопки после получения Daily Bonus — переход к обучению или в меню."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(
-        types.InlineKeyboardButton(" Начать Квест", callback_data="menu:quest")
+        types.InlineKeyboardButton("🚀 Начать обучение", callback_data="academy:facts_start")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
     )
     return markup
 
@@ -334,5 +309,242 @@ def daily_bonus_wait_kb(next_time):
     )
     markup.add(
         types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+# ==============================================================================
+# ОБНОВЛЕННЫЕ ФУНКЦИИ (ЗАМЕНЕНЫ НА НОВЫЕ ВЕРСИИ)
+# ==============================================================================
+
+def main_menu_kb():
+    """Главное меню: 2 колонки, 5 рядов."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("📆 Daily Bonus", callback_data="menu:daily_bonus"),
+        types.InlineKeyboardButton("🚀 СТАРТ", callback_data="menu:start"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("💸 PRIZM Airdrop", callback_data="menu:airdrop"),
+        types.InlineKeyboardButton("🎓 Академия PRIZM", callback_data="menu:academy"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("💳 Кошелек", callback_data="menu:wallet"),
+        types.InlineKeyboardButton("👨‍🎓 Профиль", callback_data="menu:profile"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("🛒 Купить PZM", callback_data="menu:buy"),
+        types.InlineKeyboardButton("⚙️ Настройки", callback_data="menu:settings"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("🎮 Игры", callback_data="menu:games"),
+        types.InlineKeyboardButton("❓ Помощь", callback_data="menu:help"),
+    )
+    return markup
+
+
+def back_menu_kb(callback="menu:home"):
+    """Универсальная кнопка Назад."""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data=callback)
+    )
+    return markup
+
+
+# ==============================================================================
+# НОВЫЕ ФУНКЦИИ (ДОБАВЛЕНЫ)
+# ==============================================================================
+
+def academy_kb():
+    """Академия PRIZM: 2 колонки."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("💎 10 фактов о Prizm", callback_data="academy:facts_start"),
+        types.InlineKeyboardButton("🟣 Квест: 5 шагов", callback_data="academy:quest"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("📚 Крипто-азбука", callback_data="academy:crypto_alphabet"),
+        types.InlineKeyboardButton("🛡 Мифы и Безопасность", callback_data="academy:myths"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("🎓 Финальный тест", callback_data="academy:final_test"),
+        types.InlineKeyboardButton("⚡️ Ускорение парамайнинга", callback_data="academy:paramining"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("📖 Крипто-словарь", callback_data="academy:glossary"),
+        types.InlineKeyboardButton("📚 Инструкции", callback_data="academy:instructions"),
+    )
+    # ДОБАВЛЯЕМ ЭТИ ДВЕ СТРОКИ:
+    markup.add(
+        types.InlineKeyboardButton("🎮 Демо-квест", callback_data="academy:old_quest"),
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
+    )
+    return markup
+
+
+def start_quest_kb():
+    """Кнопки после получения Daily Bonus: СТАРТ + Главное меню."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🚀 СТАРТ — начать обучение", callback_data="academy:facts_start")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
+
+
+def instructions_kb():
+    """Подменю Инструкций."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🛒 Где купить Prizm", callback_data="inst:buy"),
+        types.InlineKeyboardButton("📤 Как вывести монеты", callback_data="inst:withdraw"),
+        types.InlineKeyboardButton("💰 Как продать монеты", callback_data="inst:sell"),
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:academy"),
+    )
+    return markup
+
+
+def profile_kb():
+    """Профиль: 2 колонки."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("💎 Баланс и история", callback_data="profile:balance"),
+        types.InlineKeyboardButton("📊 Статистика", callback_data="profile:stats"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("🏆 Достижения", callback_data="profile:achievements"),
+        types.InlineKeyboardButton("👥 Рефералы", callback_data="profile:referrals"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
+    )
+    return markup
+
+
+def referrals_kb():
+    """Подменю Рефералов."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("🔗 Моя ссылка", callback_data="ref:my_link"),
+        types.InlineKeyboardButton("👥 Мои рефералы", callback_data="ref:my_referrals"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("📝 Условия и награды", callback_data="ref:rules"),
+        types.InlineKeyboardButton("📊 Статистика", callback_data="ref:stats"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:profile"),
+    )
+    return markup
+
+
+def achievements_kb():
+    """Подменю Достижений (бывшие Бейджи)."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🥇 Мои бейджи", callback_data="ach:badges"),
+        types.InlineKeyboardButton("📜 История наград", callback_data="ach:history"),
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:profile"),
+    )
+    return markup
+
+
+def wallet_kb():
+    """Кошелек: 2 колонки."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("🔵 TON-кошелек", callback_data="wallet:ton"),
+        types.InlineKeyboardButton("🟣 PRIZM-кошелек", callback_data="wallet:prizm"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("📥 Пополнить баланс", callback_data="wallet:deposit"),
+        types.InlineKeyboardButton("📤 Вывести монеты", callback_data="wallet:withdraw"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
+    )
+    return markup
+
+
+def buy_pzm_kb():
+    """Купить PZM: 2 колонки."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("📈 Курс PZM", callback_data="buy:rate"),
+        types.InlineKeyboardButton("📊 График", callback_data="buy:chart"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("🔢 Калькулятор", callback_data="buy:calc"),
+        types.InlineKeyboardButton("📚 Инструкции", callback_data="buy:instructions"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
+    )
+    return markup
+
+
+def airdrop_kb():
+    """PRIZM Airdrop."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🔢 Ввести промокод", callback_data="airdrop:promo"),
+        types.InlineKeyboardButton("🪎 Открыть PRIZM-BOX", callback_data="airdrop:box"),
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
+    )
+    return markup
+
+
+def daily_bonus_menu_kb():
+    """Daily Bonus: подменю."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🎁 Забрать награду", callback_data="bonus:claim_daily"),
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
+    )
+    return markup
+
+
+def start_kb():
+    """Кнопка СТАРТ (ведет к началу или продолжению 10 фактов)."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🟢 Начать обучение", callback_data="academy:facts_start"),
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
+    )
+    return markup
+
+
+def help_kb():
+    """Помощь."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("💬 Задать вопрос", callback_data="help:ask"),
+        types.InlineKeyboardButton("📜 Команды бота", callback_data="help:commands"),
+        types.InlineKeyboardButton("ℹ️ О боте", callback_data="help:about"),
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
+    )
+    return markup
+
+
+def settings_kb():
+    """Настройки."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🌐 Язык: Русский", callback_data="settings:lang_ru"),
+        types.InlineKeyboardButton("🔔 Уведомления", callback_data="settings:notifications"),
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
+    )
+    return markup
+
+
+def games_kb():
+    """Игры (заглушка)."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🕹 Мини-игры (скоро)", callback_data="games:stub"),
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
     )
     return markup
