@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS users (
     level TEXT CHECK(level IN ('newbie', 'known')),
     consent_at TEXT,
     state TEXT NOT NULL DEFAULT 'START',
-    crystals INTEGER NOT NULL DEFAULT 0,
+    pzm INTEGER NOT NULL DEFAULT 0,
+    knowledge_crystals INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     final_test_passed INTEGER NOT NULL DEFAULT 0,
@@ -27,7 +28,8 @@ CREATE TABLE IF NOT EXISTS users (
     referral_code TEXT,
     referrals_count INTEGER NOT NULL DEFAULT 0,
     captcha_passed INTEGER NOT NULL DEFAULT 0,
-    welcome_bonus_claimed INTEGER NOT NULL DEFAULT 0
+    welcome_bonus_claimed INTEGER NOT NULL DEFAULT 0,
+    facts_completed TEXT DEFAULT ''
 );
 
 
@@ -40,7 +42,7 @@ CREATE TABLE IF NOT EXISTS fact_progress (
     UNIQUE(tg_id, fact_id)
 );
 
-CREATE TABLE IF NOT EXISTS crystals_ledger (
+CREATE TABLE IF NOT EXISTS pzm_ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tg_id INTEGER NOT NULL,
     amount INTEGER NOT NULL,
@@ -107,14 +109,23 @@ CREATE TABLE IF NOT EXISTS word_progress (
     completed_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(tg_id, word_id)
 );
+
+CREATE TABLE IF NOT EXISTS fact10_progress (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id INTEGER NOT NULL,
+    fact_id INTEGER NOT NULL,
+    completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(tg_id, fact_id)
+);
 """
 
 BADGES_SEED = [
-    ("facts_master", "🔷 Исследователь Prizm"),
+    ("facts_master", "📚 Ученик Prizm"),
     ("security_keeper", "🔐 Хранитель безопасности"),
     ("quest_graduate", "🎓 Выпускник квеста"),
     ("myth_master", "🎭 Разоблачитель мифов"),
     ("word_master", "🧠 Эрудит Prizm"),
+    ("researcher_prizm", "🔷 Исследователь Prizm"),
 ]
 
 
@@ -141,6 +152,9 @@ def init_db():
             "ALTER TABLE users ADD COLUMN referrals_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN captcha_passed INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN welcome_bonus_claimed INTEGER NOT NULL DEFAULT 0", 
+            "ALTER TABLE users ADD COLUMN facts_completed TEXT DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN pzm INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN knowledge_crystals INTEGER NOT NULL DEFAULT 0",
         ]
         
         for sql in new_columns:
@@ -305,7 +319,7 @@ def claim_daily_bonus(tg_id):
             UPDATE users
             SET daily_bonus_streak = ?,
                 last_daily_bonus = datetime('now'),
-                crystals = crystals + 1,
+                pzm = pzm + 1,
                 updated_at = datetime('now')
             WHERE tg_id = ?
             """,
@@ -314,7 +328,7 @@ def claim_daily_bonus(tg_id):
         
         # Записываем в ledger
         conn.execute(
-            "INSERT INTO crystals_ledger (tg_id, amount, reason) VALUES (?, ?, ?)",
+            "INSERT INTO pzm_ledger (tg_id, amount, reason) VALUES (?, ?, ?)",
             (tg_id, 1, "daily_bonus"),
         )
         
@@ -516,22 +530,17 @@ def count_done_words(tg_id):
         conn.close()
 
 
-def add_crystals(tg_id, amount, reason):
-    if amount == 0:
-        return
+def add_pzm(tg_id, amount, reason):
+    """Начислить PZM на баланс и записать в ledger."""
     conn = get_connection()
     try:
         conn.execute(
-            "INSERT INTO crystals_ledger (tg_id, amount, reason) VALUES (?, ?, ?)",
-            (tg_id, amount, reason),
+            "UPDATE users SET pzm = pzm + ?, updated_at = datetime('now') WHERE tg_id = ?",
+            (amount, tg_id)
         )
         conn.execute(
-            """
-            UPDATE users
-            SET crystals = crystals + ?, updated_at = datetime('now')
-            WHERE tg_id = ?
-            """,
-            (amount, tg_id),
+            "INSERT INTO pzm_ledger (tg_id, amount, reason) VALUES (?, ?, ?)",
+            (tg_id, amount, reason)
         )
         conn.commit()
     finally:
@@ -589,7 +598,8 @@ def reset_user_progress(tg_id):
     try:
         conn.execute(
             """UPDATE users SET
-                crystals = 0,
+                pzm = 0,
+                knowledge_crystals = 0,
                 final_test_passed = 0,
                 prizm_address = NULL,
                 captcha_passed = 0,
@@ -609,8 +619,8 @@ def reset_user_progress(tg_id):
         conn.execute("DELETE FROM myth_progress WHERE tg_id = ?", (tg_id,))
         conn.execute("DELETE FROM word_progress WHERE tg_id = ?", (tg_id,))
         conn.execute("DELETE FROM user_badges WHERE tg_id = ?", (tg_id,))
-        conn.execute("DELETE FROM crystals_ledger WHERE tg_id = ?", (tg_id,))
-        conn.commit()
+        conn.execute("DELETE FROM pzm_ledger WHERE tg_id = ?", (tg_id,))
+        conn.execute("DELETE FROM fact10_progress WHERE tg_id = ?", (tg_id,))
     finally:
         conn.close()
 
@@ -1154,4 +1164,109 @@ def gram_series_since(ts0):
             "SELECT ts, other_amount*1.0/pzm_amount FROM trades "
             "WHERE other_sym='GRAM' AND pzm_amount>0 AND other_amount>0 AND ts>=? "
             "ORDER BY ts", (ts0,)).fetchall()
-    
+
+
+# ==============================================================================
+# КРИСТАЛЛЫ ЗНАНИЯ (счётчик прогресса 0-10)
+# ==============================================================================
+
+def get_knowledge_crystals(tg_id):
+    """Получить количество Кристаллов Знания."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT knowledge_crystals FROM users WHERE tg_id = ?", (tg_id,)
+        ).fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def add_knowledge_crystal(tg_id):
+    """Начислить 1 Кристалл Знания."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET knowledge_crystals = knowledge_crystals + 1, updated_at = datetime('now') WHERE tg_id = ?",
+            (tg_id,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_pzm_balance(tg_id):
+    """Получить баланс PZM."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT pzm FROM users WHERE tg_id = ?", (tg_id,)
+        ).fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+# ==============================================================================
+# РАБОТА С 10 ФАКТАМИ О PRIZM
+# ==============================================================================
+
+def get_facts10_completed(tg_id):
+    """Список id пройденных фактов (1-10)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT fact_id FROM fact10_progress WHERE tg_id = ?", (tg_id,)
+        )
+        return [row[0] for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def mark_fact10_completed(tg_id, fact_id):
+    """Отметить факт пройденным."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO fact10_progress (tg_id, fact_id) VALUES (?, ?)",
+            (tg_id, fact_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def is_fact10_completed(tg_id, fact_id):
+    """Пройден ли конкретный факт."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM fact10_progress WHERE tg_id = ? AND fact_id = ?",
+            (tg_id, fact_id)
+        )
+        return cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def reward_fact10(tg_id, fact_id):
+    """Начислить награду за факт: 1 Кристалл Знания + 10 PZM."""
+    add_knowledge_crystal(tg_id)
+    add_pzm(tg_id, 10, f"fact10_{fact_id}")
+
+
+# ==============================================================================
+# НАЗВАНИЯ БЕЙДЖЕЙ
+# ==============================================================================
+
+BADGE_TITLES = {
+    "facts_master": "📚 Ученик Prizm",
+    "security_keeper": "🔐 Хранитель безопасности",
+    "quest_graduate": "🎓 Выпускник квеста",
+    "myth_master": "🎭 Разоблачитель мифов",
+    "word_master": "🧠 Эрудит Prizm",
+    "researcher_prizm": "🔷 Исследователь Prizm",
+}
+

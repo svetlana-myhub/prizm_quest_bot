@@ -8,6 +8,7 @@ from telebot import types
 
 from config import BOT_TOKEN, ADMIN_TG_IDS
 import db
+from content import facts_10
 from keyboards import (
     level_kb,
     main_menu_kb,
@@ -47,6 +48,9 @@ from keyboards import (
     settings_kb,
     games_kb,
     back_menu_kb,
+    fact_step_kb,
+    fact_quiz_kb,
+    fact_result_kb,
 )
 from texts import (
     DISCLAIMER,
@@ -433,7 +437,7 @@ def claim_bonus(call):
         return
     
     # Начисляем бонус
-    db.add_crystals(call.from_user.id, 10, "welcome_bonus")
+    db.add_pzm(call.from_user.id, 10, "welcome_bonus")
     db.mark_welcome_bonus_claimed(call.from_user.id)
     
     bot.answer_callback_query(call.id, "✅ +10 Prizm!")
@@ -585,7 +589,7 @@ def fact_flow(call):
             extra = ""
             if not db.is_fact_done(call.from_user.id, fact["id"]):
                 db.mark_fact_done(call.from_user.id, fact["id"], True)
-                db.add_crystals(
+                db.add_pzm(
                     call.from_user.id,
                     fact["reward_crystals"],
                     f"fact:{fact['id']}",
@@ -665,7 +669,7 @@ def complete_step(call, step):
     tg_id = call.from_user.id
     if not db.is_step_done(tg_id, step["id"]):
         db.mark_step_done(tg_id, step["id"])
-        db.add_crystals(tg_id, step["reward_crystals"], f"quest:{step['id']}")
+        db.add_pzm(tg_id, step["reward_crystals"], f"quest:{step['id']}")
 
     extra = ""
     if step.get("badge"):
@@ -774,7 +778,7 @@ def myth_flow(call):
         if not db.is_myth_done(call.from_user.id, myth["id"]):
             db.mark_myth_done(call.from_user.id, myth["id"], is_correct)
             if is_correct:
-                db.add_crystals(
+                db.add_pzm(
                     call.from_user.id,
                     myth["reward_crystals"],
                     f"myth:{myth['id']}",
@@ -836,7 +840,7 @@ def word_flow(call):
         if not db.is_word_done(call.from_user.id, word["id"]):
             db.mark_word_done(call.from_user.id, word["id"], is_correct)
             if is_correct:
-                db.add_crystals(
+                db.add_pzm(
                     call.from_user.id,
                     word["reward_crystals"],
                     f"word:{word['id']}",
@@ -1336,7 +1340,7 @@ def show_main_menu(call):
     """Главное меню."""
     bot.answer_callback_query(call.id)
     user = db.get_user(call.from_user.id)
-    balance = user.get("crystals", 0) if user else 0
+    balance = user.get("pzm", 0) if user else 0
     referral_link = f"https://t.me/PrizmQuestBot?start=ref{call.from_user.id}"
     
     text = (
@@ -1385,7 +1389,7 @@ def show_profile(call):
     """Профиль."""
     bot.answer_callback_query(call.id)
     user = db.get_user(call.from_user.id)
-    balance = user.get("crystals", 0) if user else 0
+    balance = user.get("pzm", 0) if user else 0
     achievements = user.get("achievements", 0) if user else 0
     referrals = user.get("referrals_count", 0) if user else 0
     
@@ -1537,9 +1541,185 @@ def show_final_test(call):
     edit_or_send(call, "🎓 Готовы пройти финальный тест?", final_test_start_kb())
 
 
+# ==============================================================================
+# ОБРАБОТЧИКИ 10 ФАКТОВ О PRIZM
+# ==============================================================================
+
+@bot.callback_query_handler(func=lambda call: call.data == "academy:facts_start")
+def start_facts_10(call):
+    """Начать обучение с первого непройденного факта."""
+    bot.answer_callback_query(call.id)
+    completed = db.get_facts10_completed(call.from_user.id)
+    
+    # Находим первый непройденный факт
+    next_fact = None
+    for fact in facts_10.FACTS:
+        if fact["id"] not in completed:
+            next_fact = fact
+            break
+    
+    if next_fact is None:
+        edit_or_send(call, "🎉 Вы уже изучили все доступные факты!", back_menu_kb("menu:academy"))
+        return
+    
+    # Запускаем с первого шага
+    text = facts_10.get_fact_step_text(next_fact, 0)
+    edit_or_send(call, text, fact_step_kb(next_fact["id"], 0, len(next_fact["steps"])))
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("fact10:start:"))
+def show_fact_by_id(call):
+    """Показать конкретный факт по id (для кнопки 'Следующий факт')."""
+    bot.answer_callback_query(call.id)
+    fact_id = int(call.data.split(":")[2])
+    fact = facts_10.get_fact_by_id(fact_id)
+    
+    if fact is None:
+        edit_or_send(call, "Факт не найден.", back_menu_kb("menu:academy"))
+        return
+    
+    text = facts_10.get_fact_step_text(fact, 0)
+    edit_or_send(call, text, fact_step_kb(fact_id, 0, len(fact["steps"])))
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("fact10:step:"))
+def show_fact_step(call):
+    """Показать конкретный шаг факта."""
+    bot.answer_callback_query(call.id)
+    parts = call.data.split(":")
+    fact_id = int(parts[2])
+    step_index = int(parts[3])
+    
+    fact = facts_10.get_fact_by_id(fact_id)
+    if fact is None:
+        return
+    
+    text = facts_10.get_fact_step_text(fact, step_index)
+    if text is None:
+        return
+    
+    edit_or_send(call, text, fact_step_kb(fact_id, step_index, len(fact["steps"])))
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("fact10:quiz:"))
+def show_fact_quiz(call):
+    """Показать вопрос по факту."""
+    bot.answer_callback_query(call.id)
+    fact_id = int(call.data.split(":")[2])
+    fact = facts_10.get_fact_by_id(fact_id)
+    
+    if fact is None:
+        return
+    
+    # Формируем текст: прогресс + вопрос
+    progress_text = fact.get("progress", "")
+    question_text = f"❓ <b>{fact['quiz']['question']}</b>\n\n"
+    options_text = "\n".join(fact["quiz"]["options"])
+    
+    full_text = f"{progress_text}\n\n{question_text}{options_text}"
+    edit_or_send(call, full_text, fact_quiz_kb(fact_id, len(fact["quiz"]["options"])))
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("fact10:ans:"))
+def answer_fact_quiz(call):
+    """Обработать ответ на вопрос факта."""
+    bot.answer_callback_query(call.id)
+    parts = call.data.split(":")
+    fact_id = int(parts[2])
+    answer_index = int(parts[3])
+    
+    fact = facts_10.get_fact_by_id(fact_id)
+    if fact is None:
+        return
+    
+    quiz = fact["quiz"]
+    is_correct = answer_index == quiz["correct_index"]
+    
+    # Отмечаем факт как пройденный и начисляем награды (только при правильном ответе)
+    if is_correct and not db.is_fact10_completed(call.from_user.id, fact_id):
+        db.mark_fact10_completed(call.from_user.id, fact_id)
+        db.reward_fact10(call.from_user.id, fact_id)
+        
+        badge_id = fact.get("badge_after")
+        badge_text = ""
+        if badge_id and badge_id in db.BADGE_TITLES:
+            if db.award_badge_once(call.from_user.id, badge_id):
+                badge_text = f"\n\n🏆 <b>Новый бейдж: «{db.BADGE_TITLES[badge_id]}»!</b>"
+    else:
+        badge_text = ""
+    
+    # Формируем текст результата
+    if is_correct:
+        explanation = quiz["correct_explanation"]
+        result_text = (
+            f"✅ <b>Верно!</b> +1 💎 Кристалл Знания и +10 PZM\n\n"
+            f"{explanation}{badge_text}"
+        )
+    else:
+        explanation = quiz["wrong_explanations"][answer_index]
+        result_text = (
+            f"❌ <b>Неверно.</b>\n\n{explanation}"
+        )
+    
+    # Определяем следующий факт
+    completed = db.get_facts10_completed(call.from_user.id)
+    next_fact = None
+    for f in facts_10.FACTS:
+        if f["id"] not in completed:
+            next_fact = f
+            break
+    
+    next_fact_id = next_fact["id"] if next_fact else None
+    
+    edit_or_send(call, result_text, fact_result_kb(fact_id, is_correct, next_fact_id))
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "fact10:all_done")
+def facts_all_done(call):
+    """Все факты пройдены."""
+    bot.answer_callback_query(call.id)
+    text = (
+        "🎉 <b>Поздравляем! Вы прошли все 10 фактов о Prizm!</b>\n\n"
+        "Вы собрали все 💎 Кристаллы Знания и готовы к следующему этапу — Квесту из 5 шагов.\n\n"
+        "В Квесте вы:\n"
+        "• Создадите личный PRIZM-кошелёк\n"
+        "• Получите подарок 1100 PZM\n"
+        "• Откроете доступ к мини-играм\n\n"
+        "Готовы начать? Жмите кнопку ниже 👇"
+    )
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🟣 Начать Квест", callback_data="academy:quest"),
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    edit_or_send(call, text, markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "profile:balance")
+def show_balance(call):
+    """Показать баланс PZM и Кристаллов Знания."""
+    bot.answer_callback_query(call.id)
+    pzm = db.get_pzm_balance(call.from_user.id)
+    crystals = db.get_knowledge_crystals(call.from_user.id)
+    
+    text = (
+        f"<b>💎 Ваш баланс:</b>\n\n"
+        f"💸 <b>PZM:</b> {pzm} монет\n"
+        f"💎 <b>Кристаллы Знания:</b> {crystals}/10\n\n"
+        f"Пройдите обучение, чтобы собрать все 10 Кристаллов и получить артефакт «Спектр Знания»!"
+    )
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:profile")
+    )
+    
+    edit_or_send(call, text, markup)
+
+
 # Заглушки для кнопок, которые пока не реализованы
 @bot.callback_query_handler(func=lambda call: call.data in (
-    "academy:facts_start", "academy:quest",
+    "academy:quest",
     "academy:myths", "academy:paramining",
     "academy:glossary", "inst:buy", "inst:withdraw", "inst:sell",
     "profile:balance", "profile:stats", "ref:my_link", "ref:my_referrals",

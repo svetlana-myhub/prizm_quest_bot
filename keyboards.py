@@ -548,3 +548,75 @@ def games_kb():
         types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:home"),
     )
     return markup
+
+
+def fact_step_kb(fact_id, step_index, total_steps):
+    """Кнопка для перехода к следующему шагу факта."""
+    markup = types.InlineKeyboardMarkup()
+    if step_index < total_steps - 1:
+        markup.add(
+            types.InlineKeyboardButton(
+                "➡️ Далее",
+                callback_data=f"fact10:step:{fact_id}:{step_index + 1}"
+            )
+        )
+    else:
+        markup.add(
+            types.InlineKeyboardButton(
+                "✅ Я понял, давай вопрос!",
+                callback_data=f"fact10:quiz:{fact_id}"
+            )
+        )
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:academy")
+    )
+    return markup
+
+
+def fact_quiz_kb(fact_id, options_count=4):
+    """Клавиатура с 4 вариантами ответа в один ряд."""
+    markup = types.InlineKeyboardMarkup(row_width=4)
+    buttons = []
+    for i in range(options_count):
+        buttons.append(
+            types.InlineKeyboardButton(
+                str(i + 1),
+                callback_data=f"fact10:ans:{fact_id}:{i}"
+            )
+        )
+    markup.add(*buttons)
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад к тексту", callback_data=f"fact10:step:{fact_id}:0")
+    )
+    return markup
+
+
+def fact_result_kb(fact_id, is_correct, next_fact_id=None):
+    """Клавиатура после ответа на вопрос."""
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if is_correct:
+        if next_fact_id:
+            markup.add(
+                types.InlineKeyboardButton(
+                    "➡️ Следующий факт",
+                    callback_data=f"fact10:start:{next_fact_id}"
+                )
+            )
+        else:
+            markup.add(
+                types.InlineKeyboardButton(
+                    "🎓 Завершить обучение",
+                    callback_data="fact10:all_done"
+                )
+            )
+    else:
+        markup.add(
+            types.InlineKeyboardButton(
+                "🔄 Попробовать ещё раз",
+                callback_data=f"fact10:quiz:{fact_id}"
+            )
+        )
+    markup.add(
+        types.InlineKeyboardButton("🏠 Главное меню", callback_data="menu:home")
+    )
+    return markup
