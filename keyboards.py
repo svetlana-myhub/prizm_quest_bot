@@ -550,26 +550,30 @@ def games_kb():
     return markup
 
 
-def fact_step_kb(fact_id, step_index, total_steps):
-    """Кнопка для перехода к следующему шагу факта."""
-    markup = types.InlineKeyboardMarkup()
+def fact_step_kb(fact_id, step_index, total_steps, button_text="➡️ Далее"):
+    """Кнопки для шага факта: Далее + Назад (шаг назад)."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    
     if step_index < total_steps - 1:
         markup.add(
-            types.InlineKeyboardButton(
-                "➡️ Далее",
-                callback_data=f"fact10:step:{fact_id}:{step_index + 1}"
-            )
+            types.InlineKeyboardButton(button_text, callback_data=f"fact10:step:{fact_id}:{step_index + 1}")
         )
     else:
         markup.add(
-            types.InlineKeyboardButton(
-                "✅ Я понял, давай вопрос!",
-                callback_data=f"fact10:quiz:{fact_id}"
-            )
+            types.InlineKeyboardButton("💪 Всегда готов!", callback_data=f"fact10:quiz:{fact_id}")
         )
-    markup.add(
-        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:academy")
-    )
+    
+    # Кнопка Назад — шаг назад по факту (если не первый шаг)
+    if step_index > 0:
+        markup.add(
+            types.InlineKeyboardButton("⬅️ Назад", callback_data=f"fact10:step:{fact_id}:{step_index - 1}")
+        )
+    else:
+        # На первом шаге — выход на экран прогресса
+        markup.add(
+            types.InlineKeyboardButton("⬅️ Выйти", callback_data="academy:facts_progress")
+        )
+    
     return markup
 
 

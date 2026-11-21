@@ -1545,28 +1545,83 @@ def show_final_test(call):
 # ОБРАБОТЧИКИ 10 ФАКТОВ О PRIZM
 # ==============================================================================
 
-@bot.callback_query_handler(func=lambda call: call.data == "academy:facts_start")
-def start_facts_10(call):
-    """Начать обучение с первого непройденного факта."""
+@bot.callback_query_handler(func=lambda call: call.data == "academy:facts_progress")
+def facts_progress_back(call):
+    """Вернуться к экрану прогресса."""
     bot.answer_callback_query(call.id)
+    show_facts_progress(call)
+
+
+def show_facts_progress(call):
+    """Экран прогресса 10 фактов."""
     completed = db.get_facts10_completed(call.from_user.id)
+    total = 10  # Всего фактов в обучении
+    crystals = db.get_knowledge_crystals(call.from_user.id)
+    balance = db.get_pzm_balance(call.from_user.id)
     
-    # Находим первый непройденный факт
-    next_fact = None
+    # Прогресс-бары
+    facts_filled = "💎" * len(completed)
+    facts_empty = "🤍" * (10 - len(completed))
+    
+    # Квест (пока заглушка, потом подключим)
+    quest_progress = 0  # TODO: подключить реальный прогресс квеста
+    quest_filled = "🟣" * quest_progress
+    quest_empty = "🤍" * (5 - quest_progress)
+    
+    # Бейджи
+    badges = db.get_user_badges(call.from_user.id)
+    badges_text = ", ".join(db.BADGE_TITLES.get(b, b) for b in badges) if badges else "пока нет"
+    
+    # Найти следующий непройденный факт
+    next_fact_id = None
     for fact in facts_10.FACTS:
         if fact["id"] not in completed:
-            next_fact = fact
+            next_fact_id = fact["id"]
             break
     
-    if next_fact is None:
-        edit_or_send(call, "🎉 Вы уже изучили все доступные факты!", back_menu_kb("menu:academy"))
-        return
+    text = (
+        f"<b>🎓 Ваше обучение Prizm</b>\n\n"
+        f"Факты: <b>{len(completed)}/{total}</b>\n"
+        f"{facts_filled}{facts_empty}\n\n"
+        f"Квест: <b>{quest_progress}/5</b>\n"
+        f"{quest_filled}{quest_empty}\n\n"
+        f"💎 Кристаллы Знания: <b>{crystals}</b>\n"
+        f"💸 Баланс PZM: <b>{balance}</b>\n\n"
+        f"🏆 Бейджи: {badges_text}\n"
+    )
     
-    # Запускаем с первого шага
-    text = facts_10.get_fact_step_text(next_fact, 0)
-    edit_or_send(call, text, fact_step_kb(next_fact["id"], 0, len(next_fact["steps"])))
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if next_fact_id:
+        markup.add(
+            types.InlineKeyboardButton(
+                f"➡️ Продолжить с Факта №{next_fact_id}",
+                callback_data=f"fact10:start:{next_fact_id}"
+            )
+        )
+    elif len(completed) == total:
+        markup.add(
+            types.InlineKeyboardButton(
+                "🌈 Забрать артефакт «Спектр Знания»",
+                callback_data="fact10:all_done"
+            )
+        )
+    
+    if completed:
+        markup.add(
+            types.InlineKeyboardButton("🔄 Начать сначала", callback_data="fact10:reset")
+        )
+    markup.add(
+        types.InlineKeyboardButton("⬅️ Назад", callback_data="menu:academy")
+    )
+    
+    edit_or_send(call, text, markup)
 
 
+@bot.callback_query_handler(func=lambda call: call.data == "academy:facts_start")
+def start_facts_10(call):
+    """Показать экран прогресса перед началом/продолжением обучения."""
+    bot.answer_callback_query(call.id)
+    show_facts_progress(call)
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fact10:start:"))
 def show_fact_by_id(call):
     """Показать конкретный факт по id (для кнопки 'Следующий факт')."""
@@ -1652,7 +1707,7 @@ def answer_fact_quiz(call):
     if is_correct:
         explanation = quiz["correct_explanation"]
         result_text = (
-            f"✅ <b>Верно!</b> +1 💎 Кристалл Знания и +10 PZM\n\n"
+            f"✅ <b>Верно!</b> +10 PZM\n\n"
             f"{explanation}{badge_text}"
         )
     else:
@@ -1715,6 +1770,65 @@ def show_balance(call):
     )
     
     edit_or_send(call, text, markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "fact10:reset")
+def reset_facts_10(call):
+    """Сбросить прогресс по 10 фактам с проверкой баланса."""
+    bot.answer_callback_query(call.id)
+    
+    completed = db.get_facts10_completed(call.from_user.id)
+    facts_count = len(completed)
+    
+    if facts_count == 0:
+        bot.answer_callback_query(call.id, "У вас нет пройденных фактов для сброса", show_alert=True)
+        return
+    
+    pzm_to_deduct = facts_count * 10
+    crystals_to_deduct = facts_count
+    
+    # Проверяем баланс
+    current_balance = db.get_pzm_balance(call.from_user.id)
+    current_crystals = db.get_knowledge_crystals(call.from_user.id)
+    
+    if current_balance < pzm_to_deduct:
+        bot.answer_callback_query(
+            call.id,
+            f"❌ Недостаточно PZM для сброса прогресса.\n\n"
+            f"Нужно: {pzm_to_deduct} PZM\n"
+            f"У вас: {current_balance} PZM\n\n"
+            f"Пройдите факты заново, чтобы накопить монеты.",
+            show_alert=True
+        )
+        return
+    
+    if current_crystals < crystals_to_deduct:
+        bot.answer_callback_query(
+            call.id,
+            "❌ Недостаточно Кристаллов Знания для сброса",
+            show_alert=True
+        )
+        return
+    
+    # Сбрасываем прогресс
+    conn = db.get_connection()
+    try:
+        conn.execute("DELETE FROM fact10_progress WHERE tg_id = ?", (call.from_user.id,))
+        conn.execute(
+            "UPDATE users SET pzm = pzm - ?, knowledge_crystals = knowledge_crystals - ?, updated_at = datetime('now') WHERE tg_id = ?",
+            (pzm_to_deduct, crystals_to_deduct, call.from_user.id)
+        )
+        if pzm_to_deduct > 0:
+            conn.execute(
+                "INSERT INTO pzm_ledger (tg_id, amount, reason) VALUES (?, ?, ?)",
+                (call.from_user.id, -pzm_to_deduct, "facts_reset")
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    
+    bot.answer_callback_query(call.id, "✅ Прогресс сброшен", show_alert=True)
+    show_facts_progress(call)
 
 
 # Заглушки для кнопок, которые пока не реализованы
